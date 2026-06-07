@@ -87,14 +87,6 @@ export default function Auth({ onLogin }) {
         }
         onLogin({ id: userData.id, username: userData.username });
       } else {
-        // Check if username is already taken in firestore
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('usernameNormalized', '==', username.trim().toLowerCase()));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          throw new Error('Username is already taken.');
-        }
-
         // Register in Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const firebaseUser = userCredential.user;

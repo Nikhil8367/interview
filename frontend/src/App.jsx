@@ -10,7 +10,7 @@ import RealtimeMock from './components/RealtimeMock';
 import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic } from 'lucide-react';
 import { API_BASE } from './config';
 import { db } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -66,7 +66,26 @@ function App() {
       try {
         const q = query(collection(db, 'questions'), where('userId', '==', user.id));
         const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        if (data.length === 0) {
+          console.log("No questions found in Firestore for user, auto-seeding PRESETS...");
+          const batch = writeBatch(db);
+          PRESETS.forEach(p => {
+            const qId = `q_${p.id}_${user.id}`;
+            const qRef = doc(db, 'questions', qId);
+            batch.set(qRef, {
+              ...p,
+              id: qId,
+              userId: user.id
+            });
+          });
+          await batch.commit();
+          
+          const freshSnapshot = await getDocs(q);
+          data = freshSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
         setQuestions(data);
         // Set first question active by default if none selected
         if (data.length > 0 && !activeQuestion) {
