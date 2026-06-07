@@ -14,8 +14,19 @@ import { collection, query, where, getDocs, doc, setDoc, writeBatch } from 'fire
 
 function App() {
   const [user, setUser] = useState(() => {
-    const saved = sessionStorage.getItem('verbalyst_user');
-    return saved ? JSON.parse(saved) : null;
+    const saved = localStorage.getItem('verbalyst_user');
+    const timestamp = localStorage.getItem('verbalyst_login_timestamp');
+    if (saved && timestamp) {
+      const parsedTime = parseInt(timestamp, 10);
+      const oneDay = 24 * 60 * 60 * 1000;
+      if (Date.now() - parsedTime < oneDay) {
+        return JSON.parse(saved);
+      } else {
+        localStorage.removeItem('verbalyst_user');
+        localStorage.removeItem('verbalyst_login_timestamp');
+      }
+    }
+    return null;
   });
   const [questions, setQuestions] = useState([]);
   const [activeQuestion, setActiveQuestion] = useState(null);
@@ -27,7 +38,10 @@ function App() {
     return localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
   });
   const [sttProvider, setSttProvider] = useState(() => {
-    return localStorage.getItem('verbalyst_stt_provider') || 'native';
+    const saved = localStorage.getItem('verbalyst_stt_provider');
+    if (saved) return saved;
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    return isMobile ? 'puter' : 'native';
   });
   const [sttApiKeys, setSttApiKeys] = useState(() => {
     const saved = localStorage.getItem('verbalyst_stt_api_keys');
@@ -420,7 +434,8 @@ function App() {
     return (
       <Auth onLogin={(loggedInUser) => {
         setUser(loggedInUser);
-        sessionStorage.setItem('verbalyst_user', JSON.stringify(loggedInUser));
+        localStorage.setItem('verbalyst_user', JSON.stringify(loggedInUser));
+        localStorage.setItem('verbalyst_login_timestamp', Date.now().toString());
       }} />
     );
   }
@@ -634,7 +649,7 @@ function App() {
               }}
               style={{ width: '100%', marginTop: '0.25rem' }}
             >
-              <option value="native">Web Browser Native API</option>
+              <option value="native">Web Browser Native API (Unstable on Mobile)</option>
               <option value="puter">Puter.js Speech API</option>
               <option value="groq">Groq Whisper Engine</option>
               <option value="openai">OpenAI Whisper Cloud</option>
@@ -796,7 +811,8 @@ function App() {
 
           <button
             onClick={() => {
-              sessionStorage.removeItem('verbalyst_user');
+              localStorage.removeItem('verbalyst_user');
+              localStorage.removeItem('verbalyst_login_timestamp');
               setUser(null);
               setSettingsOpen(false);
             }}

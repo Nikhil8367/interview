@@ -875,65 +875,71 @@ export default function InterviewConsole({
     } else if (sttProvider === 'native' && !isTypingMode) {
       nativeFailedRef.current = false;
       audioChunksRef.current = [];
-      try {
-        const mediaRecorder = new MediaRecorder(micStreamRef.current, {
-          mimeType: 'audio/webm'
-        });
-        
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
-          }
-        };
-
-        mediaRecorder.onstop = async () => {
-          if (!nativeFailedRef.current) {
-            setIsTranscribing(false);
-            setIsAdvancing(false);
-            return;
-          }
-          if (audioChunksRef.current.length === 0) {
-            setIsTranscribing(false);
-            setIsAdvancing(false);
-            return;
-          }
+      
+      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (!isMobile) {
+        try {
+          const mediaRecorder = new MediaRecorder(micStreamRef.current, {
+            mimeType: 'audio/webm'
+          });
           
-          setIsTranscribing(true);
-          setSpeechError(null);
-          try {
-            console.log("Speech recognition failed. Transcribing with Puter.js fallback...");
-            const text = await transcribeWithWhisper(new Blob(audioChunksRef.current, { type: 'audio/webm' }), 'puter', '');
-            setTranscript(text);
-            transcriptRef.current = text;
-            if (onTranscriptChange) onTranscriptChange(text);
-            
-            const act = pendingActionRef.current;
-            pendingActionRef.current = null;
-            if (act === 'analyze') {
-              runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
-            } else if (act === 'next' || act === 'autoadvance') {
-              const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
-              onNextQuestion({
-                question,
-                transcript: finalVal,
-                duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
-                breaksCount: breaksCountRef.current
-              });
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
             }
-          } catch (err) {
-            console.error("Puter fallback transcription failed:", err);
-            setSpeechError(`Fallback Transcription failed: ${err.message}`);
-            setIsAnalyzing(false);
-            setIsAdvancing(false);
-          } finally {
-            setIsTranscribing(false);
-          }
-        };
+          };
 
-        mediaRecorderRef.current = mediaRecorder;
-        mediaRecorder.start(1000);
-      } catch (err) {
-        console.warn("Could not start background MediaRecorder fallback:", err);
+          mediaRecorder.onstop = async () => {
+            if (!nativeFailedRef.current) {
+              setIsTranscribing(false);
+              setIsAdvancing(false);
+              return;
+            }
+            if (audioChunksRef.current.length === 0) {
+              setIsTranscribing(false);
+              setIsAdvancing(false);
+              return;
+            }
+            
+            setIsTranscribing(true);
+            setSpeechError(null);
+            try {
+              console.log("Speech recognition failed. Transcribing with Puter.js fallback...");
+              const text = await transcribeWithWhisper(new Blob(audioChunksRef.current, { type: 'audio/webm' }), 'puter', '');
+              setTranscript(text);
+              transcriptRef.current = text;
+              if (onTranscriptChange) onTranscriptChange(text);
+              
+              const act = pendingActionRef.current;
+              pendingActionRef.current = null;
+              if (act === 'analyze') {
+                runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
+              } else if (act === 'next' || act === 'autoadvance') {
+                const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
+                onNextQuestion({
+                  question,
+                  transcript: finalVal,
+                  duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+                  breaksCount: breaksCountRef.current
+                });
+              }
+            } catch (err) {
+              console.error("Puter fallback transcription failed:", err);
+              setSpeechError(`Fallback Transcription failed: ${err.message}`);
+              setIsAnalyzing(false);
+              setIsAdvancing(false);
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+
+          mediaRecorderRef.current = mediaRecorder;
+          mediaRecorder.start(1000);
+        } catch (err) {
+          console.warn("Could not start background MediaRecorder fallback:", err);
+        }
+      } else {
+        console.log("Mobile device detected. Skipping concurrent background MediaRecorder for native STT to avoid device locks.");
       }
       
       startSpeechRecognitionInstance();
