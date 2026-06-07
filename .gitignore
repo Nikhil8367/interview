@@ -38,6 +38,7 @@ build/
 .firebase/
 firebase-debug.log
 .firebaserc.local
+frontend/src/firebase.js
 
 # ── Backend runtime data ───────────────────────────────
 backend/db.json
