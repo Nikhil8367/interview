@@ -1,16 +1,12 @@
 {
   "hosting": {
-    "public": "frontend/dist",
+    "public": "public",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api"
-      },
       {
         "source": "**",
         "destination": "/index.html"
@@ -22,8 +18,17 @@
   },
   "firestore": {
     "database": "(default)",
-    "location": "us-central1",
+    "location": "asia-south1",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Interviewer AI",
+        "supportEmail": "quizdmn@gmail.com"
+      }
+    }
   }
 }
