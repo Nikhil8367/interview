@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import AssessmentReport from './AssessmentReport';
 import MockInterviewReport from './MockInterviewReport';
-import { API_BASE } from '../config';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
 
 export default function HistoryView({ user }) {
   const [reports, setReports] = useState([]);
@@ -40,15 +41,10 @@ export default function HistoryView({ user }) {
     const fetchReports = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/reports`, {
-          headers: { 'x-user-id': user.id }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setReports(data);
-        } else {
-          setError('Failed to fetch past sessions.');
-        }
+        const q = query(collection(db, 'reports'), where('userId', '==', user.id));
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setReports(data);
       } catch (err) {
         console.error('Error fetching reports:', err);
         setError('Network error: Could not retrieve history.');
@@ -67,15 +63,8 @@ export default function HistoryView({ user }) {
     }
     
     try {
-      const res = await fetch(`${API_BASE}/api/reports/${reportId}`, {
-        method: 'DELETE',
-        headers: { 'x-user-id': user.id }
-      });
-      if (res.ok) {
-        setReports(prev => prev.filter(r => r.id !== reportId));
-      } else {
-        alert("Failed to delete this report entry.");
-      }
+      await deleteDoc(doc(db, 'reports', reportId));
+      setReports(prev => prev.filter(r => r.id !== reportId));
     } catch (err) {
       console.error("Error deleting report:", err);
       alert("Network error: Unable to complete delete operation.");

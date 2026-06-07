@@ -3,6 +3,7 @@ import cors from 'cors';
 import https from 'https';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 import { onRequest } from 'firebase-functions/v2/https';
 
 // Initialize Firebase Admin SDK
@@ -54,6 +55,52 @@ const PRESETS = [
 ];
 
 // 1. Auth Endpoints
+app.post('/api/auth/google', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) {
+    return res.status(400).json({ error: 'ID Token is required' });
+  }
+
+  try {
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    const { uid, email, name, picture } = decodedToken;
+
+    const usersRef = db.collection('users');
+    const doc = await usersRef.doc(uid).get();
+    let user = null;
+
+    if (!doc.exists) {
+      user = {
+        id: uid,
+        username: name || (email ? email.split('@')[0] : 'user_' + Math.random().toString(36).substr(2, 5)),
+        email: email || '',
+        picture: picture || ''
+      };
+      await usersRef.doc(uid).set(user);
+
+      // Seed default questions scoped for this user
+      const batch = db.batch();
+      PRESETS.forEach(p => {
+        const qId = `q_${p.id}_${uid}`;
+        const qRef = db.collection('questions').doc(qId);
+        batch.set(qRef, {
+          ...p,
+          id: qId,
+          userId: uid
+        });
+      });
+      await batch.commit();
+    } else {
+      user = doc.data();
+    }
+
+    res.json({ success: true, user: { id: user.id, username: user.username } });
+  } catch (error) {
+    console.error('Error verifying Google ID token:', error);
+    res.status(401).json({ error: 'Unauthorized: Invalid Google ID token' });
+  }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {

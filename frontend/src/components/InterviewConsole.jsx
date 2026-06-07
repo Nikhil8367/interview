@@ -688,16 +688,39 @@ export default function InterviewConsole({
           throw new Error("AssemblyAI API Key is required. Please set it in the header.");
         }
         
-        const tokenRes = await fetch(`${API_BASE}/api/assemblyai/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiKey: sttApiKey })
-        });
-        if (!tokenRes.ok) {
-          const err = await tokenRes.json();
-          throw new Error(err.error || 'Failed to authenticate AssemblyAI');
+        let token;
+        try {
+          const tokenRes = await fetch('https://api.assemblyai.com/v2/realtime/token', {
+            method: 'POST',
+            headers: { 
+              'Authorization': sttApiKey,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ expires_in: 600 })
+          });
+          if (!tokenRes.ok) {
+            throw new Error('AssemblyAI token request failed');
+          }
+          const data = await tokenRes.json();
+          token = data.token;
+        } catch (fetchErr) {
+          console.warn("Direct AssemblyAI token request failed (CORS limit). Trying public CORS proxy...");
+          try {
+            const tokenRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://api.assemblyai.com/v2/realtime/token')}`, {
+              method: 'POST',
+              headers: { 
+                'Authorization': sttApiKey,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ expires_in: 600 })
+            });
+            const data = await tokenRes.json();
+            const parsed = JSON.parse(data.contents);
+            token = parsed.token;
+          } catch (proxyErr) {
+            throw new Error("AssemblyAI requires a backend or CORS proxy to generate real-time tokens. Please use 'Web Browser Native API', 'Groq Whisper Engine', 'OpenAI Whisper Cloud', or 'Puter.js Speech API' instead.");
+          }
         }
-        const { token } = await tokenRes.json();
         
         const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${token}&speech_model=universal-streaming-english&sample_rate=16000`;
         const socket = new WebSocket(wsUrl);

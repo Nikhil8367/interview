@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Mic, MicOff, Plus, Trash2, BookOpen, Upload } from 'lucide-react';
-import { API_BASE } from '../config';
+import { db } from '../firebase';
+import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 export const PRESETS = [
   {
@@ -95,10 +96,7 @@ export default function QuestionManager({
     // Handle deletions
     for (const q of deleted) {
       try {
-        await fetch(`${API_BASE}/api/questions/${q.id}`, {
-          method: 'DELETE',
-          headers: { 'x-user-id': user.id }
-        });
+        await deleteDoc(doc(db, 'questions', q.id));
       } catch (err) {
         console.error("Error deleting question:", err);
       }
@@ -107,35 +105,28 @@ export default function QuestionManager({
     // Handle additions
     for (const q of added) {
       try {
-        await fetch(`${API_BASE}/api/questions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': user.id
-          },
-          body: JSON.stringify({
-            text: q.text,
-            category: q.category,
-            keywords: q.keywords,
-            suggestedAnswer: q.suggestedAnswer
-          })
+        const qId = q.id || `custom-${Date.now()}`;
+        await setDoc(doc(db, 'questions', qId), {
+          id: qId,
+          userId: user.id,
+          text: q.text,
+          category: q.category,
+          keywords: Array.isArray(q.keywords) ? q.keywords : [],
+          suggestedAnswer: q.suggestedAnswer || ''
         });
       } catch (err) {
         console.error("Error adding question:", err);
       }
     }
 
-    // Reload the full fresh set from the server db
+    // Reload the full fresh set from firestore
     try {
-      const res = await fetch(`${API_BASE}/api/questions`, {
-        headers: { 'x-user-id': user.id }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setQuestions(data);
-      }
+      const q = query(collection(db, 'questions'), where('userId', '==', user.id));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setQuestions(data);
     } catch (err) {
-      console.error("Error reloading questions from API:", err);
+      console.error("Error reloading questions from firestore:", err);
       setQuestions(updated);
     }
   };

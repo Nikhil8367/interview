@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Sparkles, Key, Award, Clock, ArrowRight } from 'lucide-react';
-import { API_BASE } from '../config';
+import { auth, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, db } from '../firebase';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { PRESETS } from './QuestionManager';
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -8,6 +10,51 @@ export default function Auth({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const firebaseUser = result.user;
+      
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userDoc = await getDoc(userRef);
+      let userData;
+      
+      if (!userDoc.exists()) {
+        const usernameVal = firebaseUser.displayName || firebaseUser.email.split('@')[0];
+        userData = {
+          id: firebaseUser.uid,
+          username: usernameVal,
+          email: firebaseUser.email,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(userRef, userData);
+
+        // Seed default questions
+        const batch = writeBatch(db);
+        PRESETS.forEach(p => {
+          const qId = `q_${p.id}_${firebaseUser.uid}`;
+          const qRef = doc(db, 'questions', qId);
+          batch.set(qRef, {
+            ...p,
+            id: qId,
+            userId: firebaseUser.uid
+          });
+        });
+        await batch.commit();
+      } else {
+        userData = userDoc.data();
+      }
+
+      onLogin({ id: userData.id, username: userData.username });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -19,23 +66,73 @@ export default function Auth({ onLogin }) {
     }
 
     setLoading(true);
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    
+    // Normalize to a valid email string for Firebase Auth
+    const email = username.includes('@') ? username.trim().toLowerCase() : `${username.trim().toLowerCase()}@verbalyst.com`;
 
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
+      if (isLogin) {
+        // Sign in via Firebase Auth
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const firebaseUser = userCredential.user;
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Something went wrong.');
+        // Fetch user doc
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const userDoc = await getDoc(userRef);
+        let userData;
+        if (userDoc.exists()) {
+          userData = userDoc.data();
+        } else {
+          userData = { id: firebaseUser.uid, username: username.trim() };
+        }
+        onLogin({ id: userData.id, username: userData.username });
+      } else {
+        // Check if username is already taken in firestore
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('usernameNormalized', '==', username.trim().toLowerCase()));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          throw new Error('Username is already taken.');
+        }
+
+        // Register in Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const firebaseUser = userCredential.user;
+
+        const userData = {
+          id: firebaseUser.uid,
+          username: username.trim(),
+          usernameNormalized: username.trim().toLowerCase(),
+          email: firebaseUser.email,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'users', firebaseUser.uid), userData);
+
+        // Seed default questions
+        const batch = writeBatch(db);
+        PRESETS.forEach(p => {
+          const qId = `q_${p.id}_${firebaseUser.uid}`;
+          const qRef = doc(db, 'questions', qId);
+          batch.set(qRef, {
+            ...p,
+            id: qId,
+            userId: firebaseUser.uid
+          });
+        });
+        await batch.commit();
+
+        onLogin({ id: userData.id, username: userData.username });
       }
-
-      onLogin(data.user);
     } catch (err) {
-      setError(err.message);
+      let msg = err.message;
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-email') {
+        msg = 'Invalid username/email or password.';
+      } else if (err.code === 'auth/email-already-in-use') {
+        msg = 'Email/Username already registered.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Password should be at least 6 characters.';
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -185,6 +282,40 @@ export default function Auth({ onLogin }) {
               {!loading && <ArrowRight size={16} />}
             </button>
           </form>
+
+          <div style={{ display: 'flex', alignItems: 'center', margin: '1rem 0', color: 'var(--text-dim)', fontSize: '0.72rem' }}>
+            <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+            <span style={{ padding: '0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>or</span>
+            <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+          </div>
+
+          <button 
+            type="button" 
+            onClick={handleGoogleSignIn}
+            className="btn btn-secondary" 
+            style={{ 
+              width: '100%', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-light)',
+              color: 'white',
+              fontSize: '0.85rem',
+              padding: '0.6rem 1rem',
+              borderRadius: '8px',
+              cursor: 'pointer'
+            }}
+            disabled={loading}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" style={{ marginRight: '8px' }}>
+              <path fill="#EA4335" d="M12 5.04c1.67 0 3.2.58 4.38 1.69l3.27-3.27C17.67 1.54 14.98 1 12 1 7.35 1 3.37 3.65 1.4 7.56l3.86 3C6.18 7.59 8.85 5.04 12 5.04z" />
+              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.47h6.46c-.28 1.48-1.12 2.74-2.38 3.58l3.69 2.87c2.16-1.99 3.72-4.92 3.72-8.58z" />
+              <path fill="#FBBC05" d="M5.26 14.12c-.24-.72-.38-1.5-.38-2.3s.14-1.58.38-2.3L1.4 6.52C.51 8.28 0 10.08 0 12s.51 3.72 1.4 5.48l3.86-3.36z" />
+              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.69-2.87c-1.02.68-2.33 1.09-3.96 1.09-3.15 0-5.82-2.55-6.74-5.52L1.7 16.15C3.67 20.06 7.65 23 12 23z" />
+            </svg>
+            Continue with Google
+          </button>
 
           <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.78rem' }}>
             <span style={{ color: 'var(--text-dim)' }}>

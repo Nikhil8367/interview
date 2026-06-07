@@ -9,6 +9,8 @@ import HistoryView from './components/HistoryView';
 import RealtimeMock from './components/RealtimeMock';
 import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic } from 'lucide-react';
 import { API_BASE } from './config';
+import { db } from './firebase';
+import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -62,16 +64,13 @@ function App() {
     if (!user) return;
     const fetchQuestions = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/questions`, {
-          headers: { 'x-user-id': user.id }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setQuestions(data);
-          // Set first question active by default if none selected
-          if (data.length > 0 && !activeQuestion) {
-            setActiveQuestion(data[0]);
-          }
+        const q = query(collection(db, 'questions'), where('userId', '==', user.id));
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setQuestions(data);
+        // Set first question active by default if none selected
+        if (data.length > 0 && !activeQuestion) {
+          setActiveQuestion(data[0]);
         }
       } catch (err) {
         console.error("Error fetching questions:", err);
@@ -200,21 +199,11 @@ function App() {
         }
 
         try {
-          const res = await fetch(`${API_BASE}/api/reports`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-id': user.id
-            },
-            body: JSON.stringify({ report: item.report })
+          await setDoc(doc(db, 'reports', item.id), {
+            ...item.report,
+            userId: user.id
           });
-
-          if (res.ok) {
-            console.log(`Synced pending report ${item.id} successfully.`);
-          } else {
-            console.error(`Failed to sync report ${item.id}. Status: ${res.status}`);
-            remainingQueue.push(item);
-          }
+          console.log(`Synced pending report ${item.id} successfully.`);
         } catch (err) {
           console.error(`Error syncing report ${item.id}:`, err);
           remainingQueue.push(item);
@@ -305,27 +294,20 @@ function App() {
     localStorage.setItem('verbalyst_pending_reports', JSON.stringify(queue));
 
     try {
-      const res = await fetch(`${API_BASE}/api/reports`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id
-        },
-        body: JSON.stringify({ report: finalReport })
+      await setDoc(doc(db, 'reports', finalReport.id), {
+        ...finalReport,
+        userId: user.id,
+        timestamp: finalReport.timestamp || new Date().toISOString()
       });
 
-      if (res.ok) {
-        let currentQueue = [];
-        try {
-          const saved = localStorage.getItem('verbalyst_pending_reports');
-          currentQueue = saved ? JSON.parse(saved) : [];
-        } catch (e) {}
-        currentQueue = currentQueue.filter(item => item.id !== queueItem.id);
-        localStorage.setItem('verbalyst_pending_reports', JSON.stringify(currentQueue));
-        console.log("Report saved successfully and synced with DB.");
-      } else {
-        console.error("Server rejected report save. Status:", res.status);
-      }
+      let currentQueue = [];
+      try {
+        const saved = localStorage.getItem('verbalyst_pending_reports');
+        currentQueue = saved ? JSON.parse(saved) : [];
+      } catch (e) {}
+      currentQueue = currentQueue.filter(item => item.id !== queueItem.id);
+      localStorage.setItem('verbalyst_pending_reports', JSON.stringify(currentQueue));
+      console.log("Report saved successfully and synced with DB.");
     } catch (err) {
       console.error("Network error saving report to db (will auto-retry on reload):", err);
     }
