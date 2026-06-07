@@ -1,5 +1,5 @@
-# Logs
-logs
+# ── Logs ──────────────────────────────────────────────
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -9,37 +9,87 @@ lerna-debug.log*
 firebase-debug.log*
 ui-debug.log*
 
-# Dependencies
+# ── Dependencies ───────────────────────────────────────
 node_modules/
 **/node_modules/
+
+# Lock files (keep yarn.lock / pnpm-lock.yaml if used, ignore npm)
 package-lock.json
 **/package-lock.json
 
-# Build files
+# ── Build output ───────────────────────────────────────
 dist/
 **/dist/
 dist-ssr/
+build/
+**/build/
 *.local
 
-# Environment variables
+# ── Environment variables ──────────────────────────────
 .env
 .env.*
 !.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Local DB & Backups
+# ── Firebase ───────────────────────────────────────────
+.firebase/
+firebase-debug.log
+.firebaserc.local
+
+# ── Backend runtime data ───────────────────────────────
 backend/db.json
 backend/backups/
 
-# Firebase configuration cache
-.firebase/
+# ── OS generated files ────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+desktop.ini
 
-# Editor directories and files
+# ── Editor / IDE ──────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/settings.json
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.swp
+*.swo
+*.orig
+*.bak
+
+# ── Vite / tooling cache ───────────────────────────────
+.vite/
+**/.vite/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# ── Test coverage & reports ────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+
+# ── Temp / scratch files ──────────────────────────────
+*.tmp
+*.temp
+tmp/
+temp/
+
+# ── System / security files ───────────────────────────
+*.pem
+*.key
+*.cert
+*.p12
+secrets.*
+
+# ── Gemini / AI agent working dir ─────────────────────
+.gemini/
+.agents/

@@ -136,24 +136,30 @@ export default function Auth({ onLogin }) {
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center', 
-      background: 'radial-gradient(circle at top left, rgba(139, 92, 246, 0.08), transparent 40%), radial-gradient(circle at bottom right, rgba(6, 182, 212, 0.08), transparent 40%), #0a0518',
-      padding: '2rem'
+      background: 'radial-gradient(circle at top left, rgba(139, 92, 246, 0.1), transparent 45%), radial-gradient(circle at bottom right, rgba(6, 182, 212, 0.1), transparent 45%), #06080f',
+      padding: '1.5rem'
     }}>
-      <div className="glass-panel" style={{ 
-        maxWidth: '900px', 
+      {/* Mobile-only top header (hidden on desktop) */}
+      <div className="auth-mobile-header" style={{ display: 'none', position: 'fixed', top: 0, left: 0, right: 0, padding: '1rem 1.25rem', background: 'rgba(9,13,23,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border-light)', zIndex: 10, alignItems: 'center', gap: '0.6rem' }}>
+        <Sparkles size={18} className="text-primary" />
+        <span style={{ fontSize: '1rem', fontWeight: 800, color: 'white', fontFamily: 'var(--font-display)' }}>Verbalyst <span style={{ color: 'var(--secondary)' }}>AI Coach</span></span>
+      </div>
+
+      <div className="glass-panel auth-grid-panel" style={{ 
+        maxWidth: '920px', 
         width: '100%', 
         display: 'grid', 
         gridTemplateColumns: '1.2fr 1fr', 
         padding: 0, 
         overflow: 'hidden',
-        minHeight: '520px',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+        minHeight: '540px',
+        boxShadow: '0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)',
         borderColor: 'rgba(255,255,255,0.06)'
       }}>
         {/* Left Side: Welcoming Visual Onboarding */}
-        <div style={{ 
+        <div className="auth-left-panel" style={{ 
           padding: '2.5rem', 
-          background: 'rgba(255, 255, 255, 0.01)', 
+          background: 'linear-gradient(160deg, rgba(139,92,246,0.06), rgba(6,182,212,0.04))', 
           borderRight: '1px solid var(--border-light)',
           display: 'flex',
           flexDirection: 'column',
@@ -212,7 +218,7 @@ export default function Auth({ onLogin }) {
         </div>
 
         {/* Right Side: Simple form */}
-        <div style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="auth-right-panel" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', marginBottom: '0.5rem' }}>
             {isLogin ? 'Welcome Back' : 'Create Account'}
           </h2>

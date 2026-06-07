@@ -7,7 +7,7 @@ import MockInterviewReport from './components/MockInterviewReport';
 import Auth from './components/Auth';
 import HistoryView from './components/HistoryView';
 import RealtimeMock from './components/RealtimeMock';
-import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic } from 'lucide-react';
+import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic, Menu } from 'lucide-react';
 import { API_BASE } from './config';
 import { db } from './firebase';
 import { collection, query, where, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
@@ -50,6 +50,14 @@ function App() {
 
   // Tab Navigation State
   const [activeTab, setActiveTab] = useState('practice'); // 'practice' | 'mock'
+
+  // Mobile nav state
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const switchTab = (tab) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+  };
 
   // Onboarding companion tour state
   const [showTour, setShowTour] = useState(() => {
@@ -310,7 +318,11 @@ function App() {
     }
 
     queue.push(queueItem);
-    localStorage.setItem('verbalyst_pending_reports', JSON.stringify(queue));
+    try {
+      localStorage.setItem('verbalyst_pending_reports', JSON.stringify(queue));
+    } catch (storageErr) {
+      console.warn("Storage quota exceeded, unable to save backup report to localStorage:", storageErr);
+    }
 
     try {
       await setDoc(doc(db, 'reports', finalReport.id), {
@@ -325,7 +337,9 @@ function App() {
         currentQueue = saved ? JSON.parse(saved) : [];
       } catch (e) {}
       currentQueue = currentQueue.filter(item => item.id !== queueItem.id);
-      localStorage.setItem('verbalyst_pending_reports', JSON.stringify(currentQueue));
+      try {
+        localStorage.setItem('verbalyst_pending_reports', JSON.stringify(currentQueue));
+      } catch (storageErr) {}
       console.log("Report saved successfully and synced with DB.");
     } catch (err) {
       console.error("Network error saving report to db (will auto-retry on reload):", err);
@@ -412,6 +426,29 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Mobile Nav Overlay */}
+      <div
+        className={`mobile-nav-overlay ${mobileMenuOpen ? 'open' : ''}`}
+        onClick={() => setMobileMenuOpen(false)}
+      />
+      <div className={`mobile-nav-sheet ${mobileMenuOpen ? 'open' : ''}`}>
+        <div className="mobile-nav-handle" />
+        {[
+          { id: 'practice', icon: <BookOpen size={18} />, label: 'Practice Arena', activeClass: 'active' },
+          { id: 'mock', icon: <Tv size={18} />, label: 'Full Mock Interview', activeClass: 'active-mock' },
+          { id: 'realtime-mock', icon: <Mic size={18} />, label: 'Realtime Live Arena', activeClass: 'active' },
+          { id: 'history', icon: <History size={18} />, label: 'History & Analytics', activeClass: 'active-history' },
+        ].map(({ id, icon, label, activeClass }) => (
+          <button
+            key={id}
+            onClick={() => switchTab(id)}
+            className={`mobile-nav-item ${activeTab === id ? activeClass : ''}`}
+          >
+            {icon} {label}
+          </button>
+        ))}
+      </div>
+
       {/* Premium Header */}
       <header className="app-header">
         <div className="logo-section">
@@ -422,51 +459,61 @@ function App() {
             <h1 className="logo-text">
               Verbalyst <span className="logo-badge">AI COACH</span>
             </h1>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-              Real-time Web Camera, Voice Analysis & Conceptual Assessments
+            <p className="logo-subtitle">
+              Voice Analysis &amp; AI Assessments
             </p>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="nav-pill-container" style={{ margin: '0 auto 0 2rem' }}>
-          <button 
+        {/* Navigation Tabs — desktop */}
+        <div className="nav-pill-container" style={{ margin: '0 auto 0 1.5rem' }}>
+          <button
             onClick={() => setActiveTab('practice')}
             className={`nav-pill-btn ${activeTab === 'practice' ? 'active-practice' : ''}`}
           >
             <BookOpen size={15} />
-            Practice Arena
+            <span className="nav-label-long">Practice Arena</span>
+            <span className="nav-label-short">Practice</span>
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('mock')}
             className={`nav-pill-btn ${activeTab === 'mock' ? 'active-mock' : ''}`}
           >
             <Tv size={15} />
-            Full Mock Interview
+            <span className="nav-label-long">Full Mock Interview</span>
+            <span className="nav-label-short">Mock</span>
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('realtime-mock')}
             className={`nav-pill-btn ${activeTab === 'realtime-mock' ? 'active-practice' : ''}`}
           >
             <Mic size={15} />
-            Realtime Live Arena
+            <span className="nav-label-long">Realtime Live Arena</span>
+            <span className="nav-label-short">Live</span>
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('history')}
             className={`nav-pill-btn ${activeTab === 'history' ? 'active-history' : ''}`}
           >
             <History size={15} />
-            History & Analytics
+            <span className="nav-label-long">History &amp; Analytics</span>
+            <span className="nav-label-short">History</span>
           </button>
         </div>
 
         <div className="header-controls">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 8px var(--success)' }} />
+          {/* Desktop user badge */}
+          <div className="user-badge-full" style={{ alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 8px var(--success)', flexShrink: 0 }} />
             <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'white' }}>{user.username}</span>
           </div>
+          {/* Mobile compact badge */}
+          <div className="user-badge-compact" style={{ alignItems: 'center', gap: '0.4rem', padding: '0.35rem 0.6rem', borderRadius: '8px', border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 6px var(--success)' }} />
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'white', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.username}</span>
+          </div>
 
-          <button 
+          <button
             className="btn btn-secondary btn-icon"
             onClick={() => setSettingsOpen(true)}
             title="Configure System Settings"
@@ -475,21 +522,26 @@ function App() {
             <Settings size={16} />
           </button>
 
-          <button 
+          <button
             onClick={() => {
               sessionStorage.removeItem('verbalyst_user');
               setUser(null);
             }}
             className="btn btn-danger"
-            style={{
-              padding: '0.45rem 1rem',
-              borderRadius: '8px',
-              fontSize: '0.78rem',
-              height: '2.25rem'
-            }}
+            style={{ padding: '0.45rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', height: '2.25rem' }}
             title="Sign Out of Session"
           >
-            <LogOut size={14} /> Log Out
+            <LogOut size={14} />
+            <span style={{ display: 'none' }} className="logout-label">Log Out</span>
+          </button>
+
+          {/* Mobile hamburger */}
+          <button
+            className="mobile-menu-btn"
+            onClick={() => setMobileMenuOpen(true)}
+            title="Open Navigation"
+          >
+            <Menu size={18} />
           </button>
         </div>
       </header>
@@ -588,6 +640,9 @@ function App() {
                 }}
                 style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem', background: '#0d121e', color: 'white', border: '1px solid var(--border-light)', borderRadius: '6px' }}
               >
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Stable Dynamic)</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Widely Supported)</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro (High Accuracy Reasoning)</option>
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced Speed)</option>
                 <option value="gemini-3.5-flash">Gemini 3.5 Flash (Agentic Coding)</option>
                 <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Low Cost)</option>

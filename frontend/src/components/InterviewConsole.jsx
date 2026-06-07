@@ -491,7 +491,7 @@ export default function InterviewConsole({
     return data.text || '';
   };
 
-  const runAnalysis = async (finalTranscript) => {
+  const runAnalysis = async (finalTranscript, forcedDuration = null, forcedBreaks = null) => {
     if (!finalTranscript.trim()) {
       alert("No speech was detected. Please answer the question before submitting.");
       setIsAnalyzing(false);
@@ -499,7 +499,8 @@ export default function InterviewConsole({
     }
     
     setIsAnalyzing(true);
-    const duration = elapsedTime > 0 ? elapsedTime : 5;
+    const duration = forcedDuration !== null ? forcedDuration : (elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5);
+    const breaks = forcedBreaks !== null ? forcedBreaks : breaksCountRef.current;
     
     let report;
     if (apiKey) {
@@ -511,7 +512,7 @@ export default function InterviewConsole({
     }
     
     report.totalDuration = duration;
-    report.breaksCount = breaksCount;
+    report.breaksCount = breaks;
     report.question = question;
 
     onAssessmentComplete(report);
@@ -780,7 +781,7 @@ export default function InterviewConsole({
           const text = transcriptRef.current;
           
           if (act === 'analyze') {
-            runAnalysis(text);
+            runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
           } else if (act === 'next' || act === 'autoadvance') {
             const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
             onNextQuestion({
@@ -829,14 +830,14 @@ export default function InterviewConsole({
             const act = pendingActionRef.current;
             pendingActionRef.current = null;
             if (act === 'analyze') {
-              runAnalysis(text);
+              runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
             } else if (act === 'next' || act === 'autoadvance') {
               const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
               onNextQuestion({
                 question,
                 transcript: finalVal,
-                duration: elapsedTime > 0 ? elapsedTime : 5,
-                breaksCount
+                duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+                breaksCount: breaksCountRef.current
               });
             }
           } catch (err) {
@@ -884,7 +885,7 @@ export default function InterviewConsole({
       }
       stopRecording();
       setIsAnalyzing(true);
-      await runAnalysis(transcript);
+      await runAnalysis(transcript, elapsedTimeRef.current, breaksCountRef.current);
     }
   };
 
@@ -903,8 +904,8 @@ export default function InterviewConsole({
       onNextQuestion({
         question,
         transcript,
-        duration: elapsedTime > 0 ? elapsedTime : 5,
-        breaksCount
+        duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+        breaksCount: breaksCountRef.current
       });
     }
   };
@@ -919,8 +920,8 @@ export default function InterviewConsole({
       onNextQuestion({
         question,
         transcript: transcript.trim() || "(No response - failed within 5s silence limit)",
-        duration: elapsedTime > 0 ? elapsedTime : 5,
-        breaksCount
+        duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+        breaksCount: breaksCountRef.current
       });
     }
   };

@@ -25,6 +25,24 @@ const LIVE_MODELS = [
 ];
 
 /* ─── helpers ────────────────────────────────────────────────────── */
+function extractJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const startIdx = text.indexOf('{');
+    const endIdx = text.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      const jsonCandidate = text.substring(startIdx, endIdx + 1);
+      try {
+        return JSON.parse(jsonCandidate);
+      } catch (innerErr) {
+        throw new Error("Found JSON block but failed to parse: " + innerErr.message + "\nRaw text: " + text);
+      }
+    }
+    throw new Error("No JSON object found in response:\n" + text);
+  }
+}
+
 function float32ToInt16(buf) {
   const out = new Int16Array(buf.length);
   for (let i = 0; i < buf.length; i++) {
@@ -70,6 +88,7 @@ export default function RealtimeMock({ questions = [], apiKey, geminiModel, user
   const [closeInfo, setCloseInfo] = useState('');
   const [sessionReport, setSessionReport] = useState(null); // scoring result
   const [isScoring, setIsScoring] = useState(false);
+  const [scoringError, setScoringError] = useState('');
 
   // Audio input/output devices selection state
   const [inputDevices, setInputDevices] = useState([]);
@@ -188,9 +207,14 @@ export default function RealtimeMock({ questions = [], apiKey, geminiModel, user
   /* ── score session ───────────────────────────────── */
   const scoreSession = useCallback(async (dialogueSnap) => {
     const realLines = dialogueSnap.filter(d => d.sender !== 'system');
-    if (!realLines.length || !apiKey) return;
+    if (!realLines.length) {
+      setScoringError('No dialogue was recorded. Please speak during the interview to generate a report.');
+      return;
+    }
 
+    setScoringError('');
     setIsScoring(true);
+
     const transcript = realLines
       .map(d => `${d.sender === 'ai' ? 'Interviewer' : 'Candidate'}: ${d.text}`)
       .join('\n');
@@ -227,20 +251,39 @@ Transcript:
 ${transcript}`;
 
     try {
+      if (!apiKey) {
+        throw new Error("Gemini API Key is missing. Please add it in settings (⚙).");
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
+
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0.3, responseMimeType: 'application/json' }
-          })
+          }),
+          signal: controller.signal
         }
       );
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`API returned status ${res.status}`);
+      }
+
       const json = await res.json();
-      const raw = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const parsedReport = JSON.parse(raw);
+      const raw = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!raw) {
+        throw new Error("Empty response or invalid model output structure");
+      }
+
+      const parsedReport = extractJson(raw);
       setSessionReport(parsedReport);
 
       // Save mapped report to history database
@@ -315,11 +358,151 @@ ${transcript}`;
         await onSaveReport(fullReport);
       }
     } catch (e) {
-      console.error('Scoring failed:', e);
+      console.error('Scoring failed, falling back to local engine:', e);
+      setScoringError(`Evaluation error: ${e.message}. Using local analysis fallback.`);
+
+      // Local fallback parsing
+      const localQuestions = [];
+      let currentQText = "Interview Question";
+      let currentAnswerText = "";
+      
+      dialogueSnap.forEach(d => {
+        if (d.sender === 'ai') {
+          if (currentAnswerText.trim()) {
+            localQuestions.push({ q: currentQText, answer: currentAnswerText.trim() });
+          }
+          currentQText = d.text;
+          currentAnswerText = "";
+        } else if (d.sender === 'user') {
+          currentAnswerText += " " + d.text;
+        }
+      });
+      if (currentAnswerText.trim()) {
+        localQuestions.push({ q: currentQText, answer: currentAnswerText.trim() });
+      }
+
+      if (localQuestions.length === 0 && dialogueSnap.some(d => d.sender === 'user')) {
+        const userText = dialogueSnap.filter(d => d.sender === 'user').map(d => d.text).join(' ');
+        localQuestions.push({
+          q: "General Speaking Response",
+          answer: userText
+        });
+      }
+
+      const evaluatedQuestions = localQuestions.map(q => {
+        const words = q.answer.split(/\s+/).filter(Boolean);
+        const originalQ = questions.find(o => o && o.text && q.q.toLowerCase().includes(o.text.toLowerCase().slice(0, 15)));
+        
+        let scoreVal = Math.min(10, Math.max(4, Math.round(words.length / 8)));
+        if (originalQ?.keywords?.length) {
+          let matches = 0;
+          originalQ.keywords.forEach(kw => {
+            if (q.answer.toLowerCase().includes(kw.toLowerCase())) matches++;
+          });
+          scoreVal = Math.round((matches / originalQ.keywords.length) * 10);
+          scoreVal = Math.min(10, Math.max(3, scoreVal));
+        }
+
+        return {
+          q: q.q,
+          score: scoreVal,
+          answer: q.answer,
+          correctAnswer: originalQ?.suggestedAnswer || "Address all target criteria, state clear definitions, and explain real-world usage.",
+          theoryMistakes: [],
+          grammarMistakes: [],
+          feedback: `Processed ${words.length} words. Answer reviewed against local parameters.`
+        };
+      });
+
+      const sumScores = evaluatedQuestions.reduce((acc, q) => acc + q.score, 0);
+      const avgScore = evaluatedQuestions.length > 0 ? (sumScores / evaluatedQuestions.length) : 7;
+      const overallScore = Math.round(avgScore * 10);
+      const gradeLetter = overallScore >= 90 ? 'A' : overallScore >= 80 ? 'B' : overallScore >= 70 ? 'C' : overallScore >= 60 ? 'D' : 'F';
+
+      const fallbackReport = {
+        overall: overallScore,
+        grade: gradeLetter,
+        summary: `(API Fallback) We completed local analysis because the Gemini API returned an error: "${e.message}".`,
+        strengths: ["Clear speak rate and responsive dialogue flow", "Interactive conversation volume"],
+        improvements: ["Check Google AI Studio billing/quota settings", "Practice technical keyword articulation"],
+        questions: evaluatedQuestions
+      };
+
+      setSessionReport(fallbackReport);
+
+      // Save mapped report to history database
+      if (onSaveReport) {
+        const userLines = dialogueSnap.filter(d => d.sender === 'user');
+        const userText = userLines.map(d => d.text).join(' ');
+        const wordCount = userText.split(/\s+/).filter(Boolean).length;
+        
+        const fillerRegex = /\b(um|uh|ah|like|you know)\b/gi;
+        const matches = userText.match(fillerRegex);
+        const fillerCount = matches ? matches.length : 0;
+        
+        const fillerBreakdown = {};
+        if (matches) {
+          matches.forEach(m => {
+            const w = m.toLowerCase();
+            fillerBreakdown[w] = (fillerBreakdown[w] || 0) + 1;
+          });
+        }
+
+        const durationSeconds = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
+        const wpm = durationSeconds > 0 ? Math.round(wordCount / (durationSeconds / 60)) : 0;
+        
+        let paceRating = 'Normal';
+        if (wpm < 110) paceRating = 'Slow';
+        else if (wpm > 170) paceRating = 'Fast';
+
+        const fullReport = {
+          score: fallbackReport.overall,
+          totalDuration: durationSeconds,
+          wpm: wpm || 130,
+          paceRating: paceRating,
+          fillerCount: fillerCount,
+          fillerBreakdown: fillerBreakdown,
+          breaksCount: 0,
+          feedback: fallbackReport.summary,
+          paceFeedback: `Your average pacing was ${wpm || 130} WPM. ${wpm < 110 ? 'Try speaking a bit faster to sound more energetic.' : wpm > 170 ? 'Try speaking a bit slower to ensure clear articulation.' : 'This is within the ideal range.'}`,
+          behavioralAssessment: "The candidate participated in a live two-way speaking session with Gemini.",
+          bluffingAudit: "No specific authenticity issues flagged during the live response session.",
+          strengths: fallbackReport.strengths,
+          weaknesses: fallbackReport.improvements,
+          actionableSteps: [
+            "Practice speaking without hesitation",
+            "Review technical interview concepts",
+            "Ensure clear pronunciation under pressure"
+          ],
+          questions: fallbackReport.questions.map((qObj) => {
+            const qTranscript = qObj.answer || 'No transcript captured.';
+            const originalQ = questions.find(o => o && o.text && qObj.q.toLowerCase().includes(o.text.toLowerCase().slice(0, 15)));
+            const suggested = originalQ?.suggestedAnswer || qObj.correctAnswer || '';
+            
+            return {
+              question: {
+                category: originalQ?.category || "Realtime Speaking",
+                text: qObj.q,
+                suggestedAnswer: suggested
+              },
+              score: qObj.score * 10,
+              transcript: qTranscript,
+              wpm: durationSeconds > 0 ? Math.round(qTranscript.split(/\s+/).filter(Boolean).length / (durationSeconds / 60 / (fallbackReport.questions.length || 1))) : 130,
+              duration: durationSeconds > 0 ? Math.round(durationSeconds / (fallbackReport.questions.length || 1)) : 10,
+              breaksCount: 0,
+              theoryMistakes: [],
+              grammarMistakes: []
+            };
+          }),
+          timestamp: new Date().toISOString()
+        };
+
+        await onSaveReport(fullReport);
+      }
     } finally {
       setIsScoring(false);
     }
-  }, [apiKey, sessionStartTime, onSaveReport]);
+  }, [apiKey, sessionStartTime, onSaveReport, questions, geminiModel]);
 
   /* ── teardown ─────────────────────────────────────────────────── */
   const teardown = useCallback(() => {
@@ -428,7 +611,7 @@ ${transcript}`;
       .join('\n');
     if (!syllabus) { setErr('Select at least one question to include in the interview.'); return; }
 
-    setErr(''); setCloseInfo('');
+    setErr(''); setCloseInfo(''); setSessionReport(null); setScoringError('');
     setStatus('connecting');
     setDialogue([{ sender: 'system', text: '⏳ Connecting to Gemini Live…' }]);
 
@@ -821,12 +1004,33 @@ Rules:
       </div>
 
       {/* ── SCORE CARD ───────────────────────────────────────────────── */}
-      {(isScoring || sessionReport) && (
+      {(isScoring || sessionReport || scoringError) && (
         <div className="rtm-score-card">
           {isScoring && (
             <div className="rtm-score-loading">
               <RefreshCw size={18} className="spin" />
               <span>Generating your session report…</span>
+            </div>
+          )}
+
+          {scoringError && (
+            <div className="rtm-score-fallback-banner" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.65rem',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '8px',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              color: '#ef4444',
+              fontSize: '0.82rem',
+              lineHeight: 1.4
+            }}>
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <div>
+                <strong>Local Fallback Active:</strong> {scoringError}
+              </div>
             </div>
           )}
 
@@ -895,7 +1099,7 @@ Rules:
               <button
                 className="btn btn-secondary"
                 style={{ fontSize: '0.78rem', padding: '0.35rem 0.9rem', marginTop: '0.5rem' }}
-                onClick={() => { setSessionReport(null); setDialogue([]); setCloseInfo(''); }}
+                onClick={() => { setSessionReport(null); setDialogue([]); setCloseInfo(''); setScoringError(''); }}
               >
                 Clear Report
               </button>

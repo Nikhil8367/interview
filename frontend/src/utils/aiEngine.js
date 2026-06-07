@@ -2,6 +2,24 @@
  * AI Engine for Speech, Grammar, and Technical Theory Assessment
  */
 
+export function extractJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const startIdx = text.indexOf('{');
+    const endIdx = text.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      const jsonCandidate = text.substring(startIdx, endIdx + 1);
+      try {
+        return JSON.parse(jsonCandidate);
+      } catch (innerErr) {
+        throw new Error("Found JSON block but failed to parse: " + innerErr.message + "\nRaw text: " + text);
+      }
+    }
+    throw new Error("No JSON object found in response:\n" + text);
+  }
+}
+
 const COMMON_FILLER_WORDS = [
   'um', 'uh', 'like', 'so', 'actually', 'basically', 'you know', 
   'literally', 'honestly', 'ah', 'er', 'okay', 'right'
@@ -239,7 +257,7 @@ export function analyzeTranscriptLocally(transcript, questionObj, durationSecond
  */
 export async function analyzeTranscriptWithGemini(transcript, questionObj, durationSeconds, apiKey, model = '') {
   try {
-    const selectedModel = model || localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
+    const selectedModel = model || localStorage.getItem('gemini_model');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
     
     const prompt = `
@@ -297,7 +315,10 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
               { text: prompt }
             ]
           }
-        ]
+        ],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
       })
     });
 
@@ -306,15 +327,9 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
     }
 
     const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
-    // Parse the JSON safely (remove potential markdown wrappers if the model ignored the instruction)
-    const cleanJsonText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/```\s*$/, '')
-      .trim();
-      
-    const parsedReport = JSON.parse(cleanJsonText);
+    const parsedReport = extractJson(rawText);
 
     // Calculate metadata locally
     const words = transcript.split(/\s+/);
@@ -521,7 +536,10 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
               { text: prompt }
             ]
           }
-        ]
+        ],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
       })
     });
 
@@ -530,15 +548,9 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
     }
 
     const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
-    // Parse the JSON safely (remove potential markdown wrappers)
-    const cleanJsonText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/```\s*$/, '')
-      .trim();
-      
-    const parsedReport = JSON.parse(cleanJsonText);
+    const parsedReport = extractJson(rawText);
 
     // Calculate metadata locally
     let totalDuration = 0;
