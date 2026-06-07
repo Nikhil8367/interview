@@ -1,0 +1,7 @@
+[
+  {
+    "category": "Backend Development",
+    "question": "What is SQL injection and how can you protect your application against it?",
+    "keywords": "SQL injection, parameterized queries, ORM, input validation"
+  }
+]
