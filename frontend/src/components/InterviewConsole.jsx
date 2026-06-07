@@ -7,6 +7,39 @@ const capitalizeSentences = (text) => {
   return text.replace(/(^\s*|[.!?]\s+)([a-z])/g, (match, separator, letter) => separator + letter.toUpperCase());
 };
 
+const renderBionicText = (text) => {
+  if (!text) return '';
+  const parts = text.split(/(\s+)/);
+  return parts.map((part, idx) => {
+    if (/^\s+$/.test(part)) {
+      return part;
+    }
+    const wordMatch = part.match(/^([a-zA-Z0-9'-]+)(.*)$/);
+    if (!wordMatch) {
+      return <span key={idx} className="bionic-word-normal">{part}</span>;
+    }
+    const [_, coreWord, punctuation] = wordMatch;
+    let boldLength = 1;
+    const len = coreWord.length;
+    if (len > 3) {
+      boldLength = Math.ceil(len * 0.5);
+    } else if (len > 1) {
+      boldLength = Math.ceil(len * 0.6);
+    }
+    
+    const boldPart = coreWord.substring(0, boldLength);
+    const normalPart = coreWord.substring(boldLength);
+    
+    return (
+      <span key={idx}>
+        <strong className="bionic-word-bold">{boldPart}</strong>
+        <span className="bionic-word-normal">{normalPart}</span>
+        {punctuation && <span className="bionic-word-normal">{punctuation}</span>}
+      </span>
+    );
+  });
+};
+
 export default function InterviewConsole({ 
   question, 
   apiKey, 
@@ -21,7 +54,11 @@ export default function InterviewConsole({
   onCancelMock,
   onTranscriptChange,
   onTimeChange,
-  onBreaksChange
+  onBreaksChange,
+  showTimer = true,
+  showCalibration = true,
+  bionicReading = false,
+  onSttProviderChange
 }) {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isReadingQuestion, setIsReadingQuestion] = useState(false);
@@ -39,6 +76,7 @@ export default function InterviewConsole({
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const pendingActionRef = useRef(null); // null | 'analyze' | 'next' | 'autoadvance'
+  const nativeFailedRef = useRef(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -208,14 +246,23 @@ export default function InterviewConsole({
     if (!question) return;
     
     // Stop any ongoing speech
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     
     const utterance = new SpeechSynthesisUtterance(question.text);
     utterance.onstart = () => setIsReadingQuestion(true);
     utterance.onend = () => {
       setIsReadingQuestion(false);
       // Auto-start recording after question finishes reading (high level UX flow)
-      handleStartRecording();
+      // On mobile devices, add a 1200ms delay to give Google Speech Services time to release the audio channel
+      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const delay = isMobile ? 1200 : 300;
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          handleStartRecording();
+        }
+      }, delay);
     };
     utterance.onerror = () => setIsReadingQuestion(false);
     
@@ -523,6 +570,17 @@ export default function InterviewConsole({
   const handleStartRecording = async () => {
     if (isRecording) return;
     
+    // Cancel any active Speech Synthesis to prevent device-in-use conflicts
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    // Delay briefly on mobile devices to let Google Speech Services release audio lines
+    const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobileDevice) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+    
     // Reset trackers
     setTranscript('');
     setElapsedTime(0);
@@ -561,8 +619,11 @@ export default function InterviewConsole({
     if (sttProvider === 'native') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        alert("Speech Recognition API is not supported in this browser. Please use Chrome, Edge, or Safari.");
-        return;
+        console.warn("Speech Recognition API is not supported in this browser. Falling back to background Puter.js recorder.");
+        nativeFailedRef.current = true;
+        if (onSttProviderChange) {
+          onSttProviderChange('puter');
+        }
       }
     }
 
@@ -620,6 +681,18 @@ export default function InterviewConsole({
 
       rec.onerror = (e) => {
         console.error("Speech Recognition Error:", e);
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        
+        if (isMobile && e.error !== 'no-speech') {
+          console.warn(`Speech recognition error '${e.error}' on mobile. Switching to Puter.js fallback...`);
+          setSpeechError("Google Speech Services error on mobile. Switched speech engine to Puter.js. Please tap start recording again.");
+          if (onSttProviderChange) {
+            onSttProviderChange('puter');
+          }
+          stopRecording();
+          return;
+        }
+
         if (e.error === 'not-allowed') {
           setSpeechError("Microphone permission blocked by browser. Please enable microphone access.");
           stopRecording();
@@ -799,6 +872,71 @@ export default function InterviewConsole({
         stopRecording();
         return;
       }
+    } else if (sttProvider === 'native' && !isTypingMode) {
+      nativeFailedRef.current = false;
+      audioChunksRef.current = [];
+      try {
+        const mediaRecorder = new MediaRecorder(micStreamRef.current, {
+          mimeType: 'audio/webm'
+        });
+        
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          if (!nativeFailedRef.current) {
+            setIsTranscribing(false);
+            setIsAdvancing(false);
+            return;
+          }
+          if (audioChunksRef.current.length === 0) {
+            setIsTranscribing(false);
+            setIsAdvancing(false);
+            return;
+          }
+          
+          setIsTranscribing(true);
+          setSpeechError(null);
+          try {
+            console.log("Speech recognition failed. Transcribing with Puter.js fallback...");
+            const text = await transcribeWithWhisper(new Blob(audioChunksRef.current, { type: 'audio/webm' }), 'puter', '');
+            setTranscript(text);
+            transcriptRef.current = text;
+            if (onTranscriptChange) onTranscriptChange(text);
+            
+            const act = pendingActionRef.current;
+            pendingActionRef.current = null;
+            if (act === 'analyze') {
+              runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
+            } else if (act === 'next' || act === 'autoadvance') {
+              const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
+              onNextQuestion({
+                question,
+                transcript: finalVal,
+                duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+                breaksCount: breaksCountRef.current
+              });
+            }
+          } catch (err) {
+            console.error("Puter fallback transcription failed:", err);
+            setSpeechError(`Fallback Transcription failed: ${err.message}`);
+            setIsAnalyzing(false);
+            setIsAdvancing(false);
+          } finally {
+            setIsTranscribing(false);
+          }
+        };
+
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start(1000);
+      } catch (err) {
+        console.warn("Could not start background MediaRecorder fallback:", err);
+      }
+      
+      startSpeechRecognitionInstance();
     } else if (sttProvider !== 'native' && !isTypingMode) {
       audioChunksRef.current = [];
       try {
@@ -858,8 +996,6 @@ export default function InterviewConsole({
         stopRecording();
         return;
       }
-    } else if (!isTypingMode) {
-      startSpeechRecognitionInstance();
     }
 
     // Start timer
@@ -971,7 +1107,7 @@ export default function InterviewConsole({
               <div className="hud-badge">
                 <Camera size={14} /> CAMERA {isCameraOn ? 'ON' : 'OFF'}
               </div>
-              {isRecording && (
+              {isRecording && showTimer && (
                 <div className="hud-badge rec">
                   <div className="rec-pulse" /> REC {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}
                 </div>
@@ -979,7 +1115,7 @@ export default function InterviewConsole({
             </div>
 
             {/* Simulated Eye Tracking Gaze Box */}
-            {isRecording && isCameraOn && (
+            {isRecording && isCameraOn && showCalibration && (
               <div style={{ display: 'flex', width: '100%', justifyContent: 'center' }}>
                 <div className="calibration-box">
                   <div className="calibration-dot" />
@@ -1149,7 +1285,7 @@ export default function InterviewConsole({
                       )}
                     </div>
                   ) : transcript ? (
-                    <span>{transcript}</span>
+                    <span>{bionicReading ? renderBionicText(transcript) : transcript}</span>
                   ) : (
                     <span className="transcript-placeholder">
                       {isRecording 

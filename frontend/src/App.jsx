@@ -48,6 +48,17 @@ function App() {
     };
   });
 
+  // General Settings States
+  const [showTimer, setShowTimer] = useState(() => {
+    return localStorage.getItem('verbalyst_show_timer') !== 'false';
+  });
+  const [showCalibration, setShowCalibration] = useState(() => {
+    return localStorage.getItem('verbalyst_show_calibration') !== 'false';
+  });
+  const [bionicReading, setBionicReading] = useState(() => {
+    return localStorage.getItem('verbalyst_bionic_reading') === 'true';
+  });
+
   // Tab Navigation State
   const [activeTab, setActiveTab] = useState('practice'); // 'practice' | 'mock'
 
@@ -522,19 +533,6 @@ function App() {
             <Settings size={16} />
           </button>
 
-          <button
-            onClick={() => {
-              sessionStorage.removeItem('verbalyst_user');
-              setUser(null);
-            }}
-            className="btn btn-danger"
-            style={{ padding: '0.45rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', height: '2.25rem' }}
-            title="Sign Out of Session"
-          >
-            <LogOut size={14} />
-            <span style={{ display: 'none' }} className="logout-label">Log Out</span>
-          </button>
-
           {/* Mobile hamburger */}
           <button
             className="mobile-menu-btn"
@@ -564,181 +562,251 @@ function App() {
           </button>
         </div>
 
-        {/* Speech-to-Text configuration */}
-        <div className="drawer-section">
-          <div className="drawer-section-title">
-            <Sliders size={16} className="text-secondary" />
-            <span>Active Speech Engine</span>
+        <div className="drawer-content">
+          {/* General Settings */}
+          <div className="drawer-section">
+            <div className="drawer-section-title">
+              <Sliders size={16} className="text-secondary" />
+              <span>General Settings</span>
+            </div>
+            <p className="drawer-description">
+              Customize the appearance and behavior of your training console.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={showTimer}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowTimer(checked);
+                    localStorage.setItem('verbalyst_show_timer', checked ? 'true' : 'false');
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Show Interview Timer
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={showCalibration}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowCalibration(checked);
+                    localStorage.setItem('verbalyst_show_calibration', checked ? 'true' : 'false');
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Show Calibration HUD Box
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={bionicReading}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setBionicReading(checked);
+                    localStorage.setItem('verbalyst_bionic_reading', checked ? 'true' : 'false');
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Bionic Reading Mode
+              </label>
+            </div>
           </div>
-          <p className="drawer-description">
-            Choose your preferred active Speech-to-Text translation engine.
-          </p>
-          <select
-            className="drawer-select"
-            value={sttProvider}
-            onChange={(e) => {
-              const val = e.target.value;
-              setSttProvider(val);
-              localStorage.setItem('verbalyst_stt_provider', val);
+
+          {/* Speech-to-Text configuration */}
+          <div className="drawer-section">
+            <div className="drawer-section-title">
+              <Sliders size={16} className="text-secondary" />
+              <span>Active Speech Engine</span>
+            </div>
+            <p className="drawer-description">
+              Choose your preferred active Speech-to-Text translation engine.
+            </p>
+            <select
+              className="drawer-select"
+              value={sttProvider}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSttProvider(val);
+                localStorage.setItem('verbalyst_stt_provider', val);
+              }}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            >
+              <option value="native">Web Browser Native API</option>
+              <option value="puter">Puter.js Speech API</option>
+              <option value="groq">Groq Whisper Engine</option>
+              <option value="openai">OpenAI Whisper Cloud</option>
+              <option value="elevenlabs">ElevenLabs Speech to Text</option>
+              <option value="assemblyai">AssemblyAI WebSocket Stream</option>
+            </select>
+          </div>
+
+          {/* Dedicated API Keys Storage Panel */}
+          <div className="drawer-section">
+            <div className="drawer-section-title">
+              <Key size={16} className="text-secondary" />
+              <span>API Keys Storage</span>
+            </div>
+            <p className="drawer-description" style={{ marginBottom: '0.75rem' }}>
+              Configure keys for your AI services. All keys are stored securely in your browser's local storage.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  GEMINI AI KEY
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Google Gemini Key (gemini-...)"
+                  value={apiKey}
+                  onChange={handleApiKeyChange}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                />
+                {apiKey ? (
+                  <span style={{ fontSize: '0.65rem', color: 'var(--success)', fontWeight: 700, marginTop: '0.25rem', display: 'block' }}>
+                    ● Active: Generative Evaluation Enabled
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.25rem', display: 'block' }}>
+                    ○ Inactive: Local Rule Engine Enabled
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  GEMINI MODEL
+                </label>
+                <select
+                  className="drawer-select"
+                  value={geminiModel}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setGeminiModel(val);
+                    localStorage.setItem('gemini_model', val);
+                  }}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem', background: '#0d121e', color: 'white', border: '1px solid var(--border-light)', borderRadius: '6px' }}
+                >
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Stable Dynamic)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Widely Supported)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (High Accuracy Reasoning)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced Speed)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Agentic Coding)</option>
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Low Cost)</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Low Latency)</option>
+                  <option value="gemini-3-flash">Gemini 3 Flash (Cost Effective)</option>
+                  <option value="gemini-2.5-flash-audio">Gemini 2.5 Flash Native Audio Dialog (Native Voice)</option>
+                  <option value="gemini-3-flash-live">Gemini 3 Flash Live (Realtime Streaming)</option>
+                  <option value="gemma-4-31b-it">Gemma 4 31B (High Reasoning)</option>
+                  <option value="gemma-4-26b-a4b-it">Gemma 4 26B MoE (High Throughput)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  GROQ WHISPER KEY
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Groq API Key (gsk_...)"
+                  value={sttApiKeys.groq || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const newKeys = { ...sttApiKeys, groq: val };
+                    setSttApiKeys(newKeys);
+                    localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
+                  }}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  OPENAI WHISPER KEY
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="OpenAI API Key (sk-...)"
+                  value={sttApiKeys.openai || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const newKeys = { ...sttApiKeys, openai: val };
+                    setSttApiKeys(newKeys);
+                    localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
+                  }}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  ELEVENLABS STT KEY
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="ElevenLabs API Key"
+                  value={sttApiKeys.elevenlabs || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const newKeys = { ...sttApiKeys, elevenlabs: val };
+                    setSttApiKeys(newKeys);
+                    localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
+                  }}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+                  ASSEMBLYAI KEY
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="AssemblyAI API Key"
+                  value={sttApiKeys.assemblyai || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const newKeys = { ...sttApiKeys, assemblyai: val };
+                    setSttApiKeys(newKeys);
+                    localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
+                  }}
+                  style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* System info / footer */}
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid var(--border-light)' }}>
+          <div style={{ padding: '0.85rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-light)', borderRadius: '8px' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>APPLICATION STACK</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block' }}>Verbalyst AI Coach v1.2.0</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginTop: '0.5rem' }}>LOGGED IN AS</span>
+            <strong style={{ fontSize: '0.8rem', color: 'white' }}>{user.username}</strong>
+          </div>
+
+          <button
+            onClick={() => {
+              sessionStorage.removeItem('verbalyst_user');
+              setUser(null);
+              setSettingsOpen(false);
             }}
-            style={{ width: '100%', marginTop: '0.25rem' }}
+            className="btn btn-danger"
+            style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+            title="Sign Out of Session"
           >
-            <option value="native">Web Browser Native API</option>
-            <option value="puter">Puter.js Speech API</option>
-            <option value="groq">Groq Whisper Engine</option>
-            <option value="openai">OpenAI Whisper Cloud</option>
-            <option value="elevenlabs">ElevenLabs Speech to Text</option>
-            <option value="assemblyai">AssemblyAI WebSocket Stream</option>
-          </select>
-        </div>
-
-        {/* Dedicated API Keys Storage Panel */}
-        <div className="drawer-section">
-          <div className="drawer-section-title">
-            <Key size={16} className="text-secondary" />
-            <span>API Keys Storage</span>
-          </div>
-          <p className="drawer-description" style={{ marginBottom: '0.75rem' }}>
-            Configure keys for your AI services. All keys are stored securely in your browser's local storage.
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                GEMINI AI KEY
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="Google Gemini Key (gemini-...)"
-                value={apiKey}
-                onChange={handleApiKeyChange}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
-              />
-              {apiKey ? (
-                <span style={{ fontSize: '0.65rem', color: 'var(--success)', fontWeight: 700, marginTop: '0.25rem', display: 'block' }}>
-                  ● Active: Generative Evaluation Enabled
-                </span>
-              ) : (
-                <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '0.25rem', display: 'block' }}>
-                  ○ Inactive: Local Rule Engine Enabled
-                </span>
-              )}
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                GEMINI MODEL
-              </label>
-              <select
-                className="drawer-select"
-                value={geminiModel}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setGeminiModel(val);
-                  localStorage.setItem('gemini_model', val);
-                }}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem', background: '#0d121e', color: 'white', border: '1px solid var(--border-light)', borderRadius: '6px' }}
-              >
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Stable Dynamic)</option>
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Widely Supported)</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro (High Accuracy Reasoning)</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced Speed)</option>
-                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Agentic Coding)</option>
-                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Low Cost)</option>
-                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Low Latency)</option>
-                <option value="gemini-3-flash">Gemini 3 Flash (Cost Effective)</option>
-                <option value="gemini-2.5-flash-audio">Gemini 2.5 Flash Native Audio Dialog (Native Voice)</option>
-                <option value="gemini-3-flash-live">Gemini 3 Flash Live (Realtime Streaming)</option>
-                <option value="gemma-4-31b-it">Gemma 4 31B (High Reasoning)</option>
-                <option value="gemma-4-26b-a4b-it">Gemma 4 26B MoE (High Throughput)</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                GROQ WHISPER KEY
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="Groq API Key (gsk_...)"
-                value={sttApiKeys.groq || ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const newKeys = { ...sttApiKeys, groq: val };
-                  setSttApiKeys(newKeys);
-                  localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
-                }}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                OPENAI WHISPER KEY
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="OpenAI API Key (sk-...)"
-                value={sttApiKeys.openai || ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const newKeys = { ...sttApiKeys, openai: val };
-                  setSttApiKeys(newKeys);
-                  localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
-                }}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                ELEVENLABS STT KEY
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="ElevenLabs API Key"
-                value={sttApiKeys.elevenlabs || ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const newKeys = { ...sttApiKeys, elevenlabs: val };
-                  setSttApiKeys(newKeys);
-                  localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
-                }}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
-                ASSEMBLYAI KEY
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="AssemblyAI API Key"
-                value={sttApiKeys.assemblyai || ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const newKeys = { ...sttApiKeys, assemblyai: val };
-                  setSttApiKeys(newKeys);
-                  localStorage.setItem('verbalyst_stt_api_keys', JSON.stringify(newKeys));
-                }}
-                style={{ width: '100%', margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* System info */}
-        <div style={{ marginTop: 'auto', padding: '1rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-light)', borderRadius: '8px' }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>APPLICATION STACK</span>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block' }}>Verbalyst AI Coach v1.2.0</span>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginTop: '0.5rem' }}>LOGGED IN AS</span>
-          <strong style={{ fontSize: '0.8rem', color: 'white' }}>{user.username}</strong>
+            <LogOut size={16} />
+            <span>Sign Out</span>
+          </button>
         </div>
       </div>
 
@@ -914,6 +982,13 @@ function App() {
                 geminiModel={geminiModel}
                 sttProvider={sttProvider}
                 sttApiKey={sttApiKeys[sttProvider] || ''}
+                showTimer={showTimer}
+                showCalibration={showCalibration}
+                bionicReading={bionicReading}
+                onSttProviderChange={(provider) => {
+                  setSttProvider(provider);
+                  localStorage.setItem('verbalyst_stt_provider', provider);
+                }}
                 onAssessmentComplete={handleAssessmentComplete} 
               />
             ) : (
@@ -941,6 +1016,13 @@ function App() {
                   geminiModel={geminiModel}
                   sttProvider={sttProvider}
                   sttApiKey={sttApiKeys[sttProvider] || ''}
+                  showTimer={showTimer}
+                  showCalibration={showCalibration}
+                  bionicReading={bionicReading}
+                  onSttProviderChange={(provider) => {
+                    setSttProvider(provider);
+                    localStorage.setItem('verbalyst_stt_provider', provider);
+                  }}
                   isMockMode={true}
                   currentMockIndex={currentMockIndex}
                   totalMockQuestions={mockQuestions.length}

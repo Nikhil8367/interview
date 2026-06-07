@@ -1161,14 +1161,47 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-backdrop-filter: blur(25px);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   z-index: 1000;
-  padding: 2.25rem;
+  padding: 2.25rem 2.25rem 1.5rem;
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6);
   transform: translateX(100%);
   transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 1.5rem;
+  overflow: hidden;
+}
+
+.drawer-content {
+  flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-right: 0.5rem;
+}
+
+.drawer-content::-webkit-scrollbar {
+  width: 6px;
+}
+.drawer-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.drawer-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+.drawer-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Bionic Reading text styling */
+.bionic-word-bold {
+  font-weight: 700;
+  color: white;
+}
+.bionic-word-normal {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .settings-drawer-panel.open {
@@ -1430,6 +1463,36 @@ select option, .drawer-select option {
   display: grid;
   grid-template-columns: 1fr 2.5fr;
   gap: 1.5rem;
+}
+
+.mock-report-container {
+  max-height: calc(100vh - 10rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.mock-report-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.mock-report-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+.mock-report-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mock-report-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.mock-report-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 @media (max-width: 900px) {
@@ -2405,9 +2468,11 @@ select option, .drawer-select option {
     max-width: 100%;
     padding: 1.5rem 1.25rem;
     border-left: none;
-    border-top: 1px solid var(--border-light);
-    border-radius: 20px 20px 0 0;
-    top: auto;
+    border-top: none;
+    border-radius: 0;
+    top: 0;
+    bottom: 0;
+    height: 100%;
   }
 
   /* Realtime mock */
@@ -2537,5 +2602,16 @@ select:focus-visible {
 /* Animate-spin utility */
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+@media (max-width: 768px) {
+  .mock-report-container {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .mock-report-scroll-container {
+    overflow-y: visible !important;
+    padding-right: 0 !important;
+  }
 }
 
