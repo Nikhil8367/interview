@@ -1070,6 +1070,7 @@ function App() {
           ) : activeTab === 'realtime-mock' ? (
             <RealtimeMock 
               questions={questions} 
+              setQuestions={setQuestions}
               apiKey={apiKey} 
               geminiModel={geminiModel} 
               user={user}

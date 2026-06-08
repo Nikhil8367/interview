@@ -4,6 +4,8 @@ import {
   CheckCircle2, Circle, Sparkles, Radio,
   Volume2, Info, RefreshCw, ChevronRight
 } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 
 
 /* ─── Live API models ────────────────────────────────────────────── */
@@ -114,7 +116,7 @@ function rms(f32) {
 }
 
 /* ══════════════════════════════════════════════════════════════════ */
-export default function RealtimeMock({ questions = [], apiKey, geminiModel, user, onSaveReport }) {
+export default function RealtimeMock({ questions = [], setQuestions, apiKey, geminiModel, user, onSaveReport }) {
   const [status, setStatus] = useState('idle'); // idle | connecting | live | error
   const [err, setErr] = useState('');
   const [liveModel, setLiveModel] = useState(LIVE_MODELS[0].id);
@@ -279,6 +281,8 @@ export default function RealtimeMock({ questions = [], apiKey, geminiModel, user
   "questions": [
     { 
       "q": <question text>, 
+      "category": <suggested category for this question, e.g. "Frontend Development", "System & Database", "Behavioral", "Backend Development", "Web Services", "Computer Networks">,
+      "keywords": [<up to 5 key technical term / concept strings for this question>],
       "score": <integer 0-10>, 
       "answer": <candidate's full consolidated response text to this question, including follow-up answers if any>, 
       "correctAnswer": <ideal correct/suggested reference response to this question>,
@@ -359,6 +363,47 @@ ${transcript}`;
       const parsedReport = extractJson(raw);
       setSessionReport(parsedReport);
 
+      // Save new AI-generated questions to the Firestore database
+      if (user && parsedReport.questions && parsedReport.questions.length > 0) {
+        const newQuestionsToSave = [];
+        for (const qObj of parsedReport.questions) {
+          if (!qObj.q) continue;
+          const exists = questions.some(o => o.text.toLowerCase().trim() === qObj.q.toLowerCase().trim());
+          if (!exists) {
+            const newQId = `gen-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            newQuestionsToSave.push({
+              id: newQId,
+              userId: user.id,
+              text: qObj.q,
+              category: qObj.category || 'Realtime AI Generated',
+              keywords: Array.isArray(qObj.keywords) ? qObj.keywords : ['explanation'],
+              suggestedAnswer: qObj.correctAnswer || ''
+            });
+          }
+        }
+
+        if (newQuestionsToSave.length > 0) {
+          console.log(`Saving ${newQuestionsToSave.length} new AI-generated questions to DB...`);
+          try {
+            const batch = writeBatch(db);
+            newQuestionsToSave.forEach(newQ => {
+              const qRef = doc(db, 'questions', newQ.id);
+              batch.set(qRef, newQ);
+            });
+            await batch.commit();
+
+            if (setQuestions) {
+              const q = query(collection(db, 'questions'), where('userId', '==', user.id));
+              const snapshot = await getDocs(q);
+              const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              setQuestions(data);
+            }
+          } catch (err) {
+            console.error("Failed to save new AI-generated questions to DB:", err);
+          }
+        }
+      }
+
       // Save mapped report to history database
       if (onSaveReport) {
         const userLines = dialogueSnap.filter(d => d.sender === 'user');
@@ -412,7 +457,7 @@ ${transcript}`;
             
             return {
               question: {
-                category: originalQ?.category || "Realtime Speaking",
+                category: originalQ?.category || qObj.category || "Realtime Speaking",
                 text: qObj.q,
                 suggestedAnswer: suggested
               },
@@ -575,7 +620,7 @@ ${transcript}`;
     } finally {
       setIsScoring(false);
     }
-  }, [apiKey, sessionStartTime, onSaveReport, questions, geminiModel]);
+  }, [apiKey, sessionStartTime, onSaveReport, questions, setQuestions, geminiModel]);
 
   /* ── teardown ─────────────────────────────────────────────────── */
   const teardown = useCallback(() => {
