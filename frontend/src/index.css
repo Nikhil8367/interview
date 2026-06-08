@@ -201,19 +201,19 @@ h1, h2, h3, h4, h5, h6 {
 
 .mobile-nav-sheet {
   position: fixed;
-  bottom: 0;
+  top: 0;
   left: 0;
   right: 0;
   z-index: 991;
   background: rgba(9,13,23,0.97);
   backdrop-filter: blur(24px);
-  border-top: 1px solid var(--border-light);
-  border-radius: 20px 20px 0 0;
-  padding: 1.25rem 1.5rem 2rem;
+  border-bottom: 1px solid var(--border-light);
+  border-radius: 0 0 20px 20px;
+  padding: 2rem 1.5rem 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  transform: translateY(100%);
+  transform: translateY(-100%);
   transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
 }
 .mobile-nav-sheet.open { transform: translateY(0); }
@@ -223,7 +223,7 @@ h1, h2, h3, h4, h5, h6 {
   height: 4px;
   background: rgba(255,255,255,0.15);
   border-radius: 99px;
-  margin: 0 auto 1rem;
+  margin: 1rem auto 0;
 }
 
 .mobile-nav-item {
@@ -1272,6 +1272,8 @@ h1, h2, h3, h4, h5, h6 {
   outline: none;
   cursor: pointer;
   transition: var(--transition);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .drawer-select:focus {
@@ -1282,6 +1284,11 @@ h1, h2, h3, h4, h5, h6 {
 select option, .drawer-select option {
   background-color: #0d121e;
   color: white;
+}
+
+select, input, textarea {
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* Premium Onboarding Steps Tour Cards */
@@ -2234,7 +2241,7 @@ select option, .drawer-select option {
 
 .rtm-score-q-row {
   display: grid;
-  grid-template-columns: 120px 42px 1fr;
+  grid-template-columns: 120px 42px minmax(0, 1fr);
   align-items: center;
   gap: 0.75rem;
 }
@@ -2264,24 +2271,31 @@ select option, .drawer-select option {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
 }
 .rtm-score-q-q {
   font-size: 0.78rem;
   color: var(--text-muted);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
 }
 .rtm-score-q-fb {
   font-size: 0.72rem;
   color: var(--text-dim);
   line-height: 1.4;
+  word-break: break-word;
 }
 
 @media (max-width: 768px) {
+  .rtm-score-card {
+    padding: 1.25rem 1rem;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
   .rtm-score-grid { grid-template-columns: 1fr; }
-  .rtm-score-q-row { grid-template-columns: 80px 36px 1fr; }
+  .rtm-score-q-row { grid-template-columns: 80px 36px minmax(0, 1fr); }
 }
 
 /* Realtime audio device selector styling */
@@ -2341,7 +2355,8 @@ select option, .drawer-select option {
   outline: none;
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
-  min-width: 120px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .rtm-device-select:hover, .rtm-device-select:focus {
@@ -2533,9 +2548,20 @@ select option, .drawer-select option {
     width: 60px;
     height: 60px;
   }
+  .rtm-score-card {
+    padding: 1rem 0.75rem;
+  }
   .rtm-score-q-row {
-    grid-template-columns: 90px 36px 1fr;
+    grid-template-columns: 70px 30px minmax(0, 1fr);
     gap: 0.5rem;
+  }
+  .rtm-devices-bar {
+    padding: 0.5rem 0.75rem;
+    gap: 0.75rem;
+  }
+  .rtm-device-group {
+    min-width: 0;
+    width: 100%;
   }
 }
 
@@ -2604,14 +2630,127 @@ select:focus-visible {
   animation: spin 1s linear infinite;
 }
 
+/* Mock Interview Setup and Report Custom Classes */
+.mock-setup-container {
+  max-width: 600px;
+  margin: 2rem auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.mock-duration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.mock-categories-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+}
+
+.mock-report-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.mock-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 1rem;
+  flex-shrink: 0;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.mock-report-header-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.mock-report-scroll-container {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  flex: 1;
+}
+
+.mock-report-main-grid {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1.5rem;
+}
+
+.mock-score-circle-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  box-sizing: border-box;
+}
+
 @media (max-width: 768px) {
+  .mock-setup-container {
+    margin: 1rem auto;
+  }
   .mock-report-container {
     max-height: none !important;
     overflow: visible !important;
+    gap: 1.25rem;
   }
   .mock-report-scroll-container {
     overflow-y: visible !important;
     padding-right: 0 !important;
+    gap: 1.25rem;
+  }
+  .mock-report-main-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .mock-score-circle-card {
+    padding: 1.25rem 1rem;
   }
 }
+
+@media (max-width: 480px) {
+  .mock-duration-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  .mock-categories-grid {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .mock-report-header-buttons {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .mock-report-header-buttons button {
+    flex: 1;
+    font-size: 0.8rem !important;
+    padding: 0.5rem 0.75rem !important;
+  }
+}
+
 

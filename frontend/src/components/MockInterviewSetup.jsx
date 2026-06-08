@@ -58,7 +58,7 @@ export default function MockInterviewSetup({ questions, onStart }) {
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '600px', margin: '2rem auto', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+    <div className="glass-panel mock-setup-container">
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
         <Settings size={24} className="text-secondary" />
         <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Mock Interview Settings</h2>
@@ -72,7 +72,7 @@ export default function MockInterviewSetup({ questions, onStart }) {
         {/* Interview Duration Selector */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <label style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-muted)' }}>Interview Time Limit</label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+          <div className="mock-duration-grid">
             {[
               { label: '5 Mins', value: 300 },
               { label: '10 Mins', value: 600 },
@@ -105,7 +105,7 @@ export default function MockInterviewSetup({ questions, onStart }) {
             </div>
           </div>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', maxHeight: '200px', overflowY: 'auto', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+          <div className="mock-categories-grid">
             {categories.map(cat => {
               const isSelected = selectedCategories.includes(cat);
               const count = questions.filter(q => q.category === cat).length;

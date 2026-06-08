@@ -53,14 +53,14 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
   };
 
   return (
-    <div className="glass-panel mock-report-container" style={{ padding: '2rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="glass-panel mock-report-container">
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', flexShrink: 0 }}>
+      <div className="mock-report-header">
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'white' }}>Mock Interview Report</h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Comprehensive performance review and AI speech audit</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div className="mock-report-header-buttons">
           <button 
             className="btn btn-secondary" 
             onClick={handleCopySummary} 
@@ -80,11 +80,11 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
         </div>
       </div>
 
-      <div className="mock-report-scroll-container" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div className="mock-report-scroll-container">
         {/* Overview Cards Container */}
         <div className="mock-report-main-grid">
           {/* Left: Overall score circle */}
-          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', textAlign: 'center' }}>
+          <div className="glass-card mock-score-circle-card">
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Rating</span>
             
             <div style={{ position: 'relative', width: '120px', height: '120px', margin: '1.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

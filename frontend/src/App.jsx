@@ -458,7 +458,6 @@ function App() {
         onClick={() => setMobileMenuOpen(false)}
       />
       <div className={`mobile-nav-sheet ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="mobile-nav-handle" />
         {[
           { id: 'practice', icon: <BookOpen size={18} />, label: 'Practice Arena', activeClass: 'active' },
           { id: 'mock', icon: <Tv size={18} />, label: 'Full Mock Interview', activeClass: 'active-mock' },
@@ -473,6 +472,7 @@ function App() {
             {icon} {label}
           </button>
         ))}
+        <div className="mobile-nav-handle" />
       </div>
 
       {/* Premium Header */}
