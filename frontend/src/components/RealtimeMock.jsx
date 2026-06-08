@@ -5,6 +5,7 @@ import {
   Volume2, Info, RefreshCw, ChevronRight
 } from 'lucide-react';
 
+
 /* ─── Live API models ────────────────────────────────────────────── */
 const LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -25,6 +26,43 @@ const LIVE_MODELS = [
 ];
 
 /* ─── helpers ────────────────────────────────────────────────────── */
+function getValidRestModel(model) {
+  if (!model) return 'gemini-2.0-flash';
+  
+  const mapped = model.trim().toLowerCase();
+  
+  // Explicitly map known live/audio models
+  if (mapped === 'gemini-2.5-flash-audio' || mapped === 'gemini-2.5-flash-native-audio-preview-12-2025') {
+    return 'gemini-2.0-flash';
+  }
+  if (mapped === 'gemini-3-flash-live' || mapped === 'gemini-3.1-flash-live-preview') {
+    return 'gemini-2.0-flash';
+  }
+
+  // Standard models supported by Google's v1beta REST API:
+  const standardModels = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-3-flash'
+  ];
+  if (standardModels.includes(mapped)) {
+    return mapped;
+  }
+  
+  // Map experimental/hypothetical/live models to the nearest valid REST model:
+  if (mapped.includes('pro')) {
+    return 'gemini-1.5-pro';
+  }
+  
+  // Default fallback
+  return 'gemini-2.0-flash';
+}
+
 function extractJson(text) {
   try {
     return JSON.parse(text);
@@ -115,6 +153,18 @@ export default function RealtimeMock({ questions = [], apiKey, geminiModel, user
     if (questions.length && !selectedIds.length)
       setSelectedIds(questions.map(q => q.id));
   }, [questions]);
+
+  // synchronize global geminiModel prop with local liveModel state
+  useEffect(() => {
+    if (geminiModel) {
+      const mapped = geminiModel.trim().toLowerCase();
+      if (mapped === 'gemini-2.5-flash-audio' || mapped === 'gemini-2.5-flash-native-audio-preview-12-2025') {
+        setLiveModel('gemini-2.5-flash-native-audio-preview-12-2025');
+      } else if (mapped === 'gemini-3-flash-live' || mapped === 'gemini-3.1-flash-live-preview') {
+        setLiveModel('gemini-3.1-flash-live-preview');
+      }
+    }
+  }, [geminiModel]);
 
   // scroll transcript
   useEffect(() => {
@@ -255,26 +305,49 @@ ${transcript}`;
         throw new Error("Gemini API Key is missing. Please add it in settings (⚙).");
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
+      const modelsToTry = [
+        getValidRestModel(geminiModel),
+        'gemini-2.0-flash',
+        'gemini-1.5-flash'
+      ];
+      const uniqueModels = [...new Set(modelsToTry)];
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, responseMimeType: 'application/json' }
-          }),
-          signal: controller.signal
+      let res = null;
+      let lastError = null;
+
+      for (const model of uniqueModels) {
+        try {
+          console.log(`Attempting session report generation with model: ${model}...`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
+
+          res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.3, responseMimeType: 'application/json' }
+              }),
+              signal: controller.signal
+            }
+          );
+
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            break;
+          }
+          console.warn(`Model ${model} failed with status ${res.status}. Retrying fallback...`);
+          lastError = new Error(`API returned status ${res.status}`);
+        } catch (e) {
+          console.warn(`Fetch error for model ${model}:`, e);
+          lastError = e;
         }
-      );
+      }
 
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        throw new Error(`API returned status ${res.status}`);
+      if (!res || !res.ok) {
+        throw lastError || new Error("Failed to score session with all fallback models");
       }
 
       const json = await res.json();

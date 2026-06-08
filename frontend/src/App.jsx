@@ -714,8 +714,10 @@ function App() {
                   <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Low Cost)</option>
                   <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Low Latency)</option>
                   <option value="gemini-3-flash">Gemini 3 Flash (Cost Effective)</option>
-                  <option value="gemini-2.5-flash-audio">Gemini 2.5 Flash Native Audio Dialog (Native Voice)</option>
-                  <option value="gemini-3-flash-live">Gemini 3 Flash Live (Realtime Streaming)</option>
+                  <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live (Realtime Streaming/Voice)</option>
+                  <option value="gemini-2.5-flash-native-audio-preview-12-2025">Gemini 2.5 Flash Native Audio (Realtime Audio)</option>
+                  <option value="gemini-2.5-flash-audio">Gemini 2.5 Flash Native Audio Dialog (Legacy)</option>
+                  <option value="gemini-3-flash-live">Gemini 3 Flash Live (Legacy)</option>
                   <option value="gemma-4-31b-it">Gemma 4 31B (High Reasoning)</option>
                   <option value="gemma-4-26b-a4b-it">Gemma 4 26B MoE (High Throughput)</option>
                 </select>

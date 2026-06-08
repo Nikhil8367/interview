@@ -253,12 +253,101 @@ export function analyzeTranscriptLocally(transcript, questionObj, durationSecond
 }
 
 /**
+ * Maps any experimental/realtime/unsupported model ID to a standard REST model ID.
+ */
+export function getValidRestModel(model) {
+  if (!model) return 'gemini-2.0-flash';
+  
+  const mapped = model.trim().toLowerCase();
+  
+  // Explicitly map known live/audio models
+  if (mapped === 'gemini-2.5-flash-audio' || mapped === 'gemini-2.5-flash-native-audio-preview-12-2025') {
+    return 'gemini-2.0-flash';
+  }
+  if (mapped === 'gemini-3-flash-live' || mapped === 'gemini-3.1-flash-live-preview') {
+    return 'gemini-2.0-flash';
+  }
+
+  // Standard models supported by Google's v1beta REST API:
+  const standardModels = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-3-flash'
+  ];
+  if (standardModels.includes(mapped)) {
+    return mapped;
+  }
+  
+  // Map experimental/hypothetical/live models to the nearest valid REST model:
+  if (mapped.includes('pro')) {
+    return 'gemini-1.5-pro';
+  }
+  
+  // Default fallback for any other models (e.g. gemma, newer experimental, etc.)
+  return 'gemini-2.0-flash';
+}
+
+/**
+ * Helper to query Gemini API with support for model fallbacks on 404, 429, or general exceptions.
+ */
+async function generateGeminiContentWithFallback(prompt, apiKey, initialModel) {
+  const modelsToTry = [
+    getValidRestModel(initialModel),
+    'gemini-2.0-flash',
+    'gemini-1.5-flash'
+  ];
+  
+  // Deduplicate candidate models
+  const uniqueModels = [...new Set(modelsToTry)];
+  
+  let lastError = null;
+  for (const model of uniqueModels) {
+    try {
+      console.log(`Attempting report generation with model: ${model}...`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          return text;
+        }
+      }
+      
+      console.warn(`Model ${model} failed with status ${response.status}. Retrying fallback...`);
+      lastError = new Error(`API returned status ${response.status}`);
+    } catch (e) {
+      console.warn(`Fetch error for model ${model}:`, e);
+      lastError = e;
+    }
+  }
+  
+  throw lastError || new Error("Failed to generate content with all fallback models");
+}
+
+/**
  * Query Gemini AI API for advanced semantic, grammar and technical correctness assessment
  */
 export async function analyzeTranscriptWithGemini(transcript, questionObj, durationSeconds, apiKey, model = '') {
   try {
-    const selectedModel = model || localStorage.getItem('gemini_model');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+    const rawModel = model || localStorage.getItem('gemini_model');
     
     const prompt = `
 You are an expert technical interviewer and communications coach.
@@ -303,32 +392,7 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
 }
 `;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    
+    const rawText = await generateGeminiContentWithFallback(prompt, apiKey, rawModel);
     const parsedReport = extractJson(rawText);
 
     // Calculate metadata locally
@@ -452,8 +516,7 @@ export function analyzeMockInterviewLocally(answers) {
 
 export async function analyzeMockInterviewWithGemini(answers, apiKey, model = '') {
   try {
-    const selectedModel = model || localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+    const rawModel = model || localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
 
     // Format questions and answers for Gemini
     const QAPairs = answers.map((ans, idx) => ({
@@ -524,31 +587,7 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
 }
 `;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const rawText = await generateGeminiContentWithFallback(prompt, apiKey, rawModel);
     
     const parsedReport = extractJson(rawText);
 

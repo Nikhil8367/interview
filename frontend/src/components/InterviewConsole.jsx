@@ -2,6 +2,49 @@ import { useState, useEffect, useRef } from 'react';
 import { Camera, CameraOff, Volume2, Mic, CheckCircle, RefreshCw, Keyboard } from 'lucide-react';
 import { API_BASE } from '../config';
 
+const isLiveModel = (model) => {
+  if (!model) return false;
+  const mapped = model.trim().toLowerCase();
+  return (
+    mapped === 'gemini-3-flash-live' ||
+    mapped === 'gemini-3.1-flash-live-preview' ||
+    mapped === 'gemini-2.5-flash-audio' ||
+    mapped === 'gemini-2.5-flash-native-audio-preview-12-2025'
+  );
+};
+
+function float32ToInt16(buf) {
+  const out = new Int16Array(buf.length);
+  for (let i = 0; i < buf.length; i++) {
+    out[i] = Math.max(-32768, Math.min(32767, buf[i] * 32768));
+  }
+  return out;
+}
+
+function int16ToFloat32(int16) {
+  const f32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+  return f32;
+}
+
+function base64ToInt16(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Int16Array(bytes.buffer);
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+
 const capitalizeSentences = (text) => {
   if (!text) return '';
   return text.replace(/(^\s*|[.!?]\s+)([a-z])/g, (match, separator, letter) => separator + letter.toUpperCase());
@@ -26,10 +69,10 @@ const renderBionicText = (text) => {
     } else if (len > 1) {
       boldLength = Math.ceil(len * 0.6);
     }
-    
+
     const boldPart = coreWord.substring(0, boldLength);
     const normalPart = coreWord.substring(boldLength);
-    
+
     return (
       <span key={idx}>
         <strong className="bionic-word-bold">{boldPart}</strong>
@@ -40,9 +83,9 @@ const renderBionicText = (text) => {
   });
 };
 
-export default function InterviewConsole({ 
-  question, 
-  apiKey, 
+export default function InterviewConsole({
+  question,
+  apiKey,
   geminiModel = 'gemini-2.5-flash',
   sttProvider = 'native',
   sttApiKey = '',
@@ -102,6 +145,10 @@ export default function InterviewConsole({
 
   const assemblyAISocketRef = useRef(null);
   const assemblyAIStreamNodeRef = useRef(null);
+  const geminiLiveSocketRef = useRef(null);
+  const geminiLiveStreamNodeRef = useRef(null);
+  const playAcRef = useRef(null);
+  const playQRef = useRef(0);
   const elapsedTimeRef = useRef(0);
   const breaksCountRef = useRef(0);
 
@@ -137,6 +184,14 @@ export default function InterviewConsole({
       }
       assemblyAIStreamNodeRef.current = null;
     }
+    if (geminiLiveStreamNodeRef.current) {
+      try {
+        geminiLiveStreamNodeRef.current.disconnect();
+      } catch (err) {
+        console.warn("Failed to disconnect Gemini Live stream node:", err);
+      }
+      geminiLiveStreamNodeRef.current = null;
+    }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(track => track.stop());
       micStreamRef.current = null;
@@ -153,7 +208,7 @@ export default function InterviewConsole({
   const stopRecording = () => {
     isRecordingRef.current = false;
     setIsRecording(false);
-    
+
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
@@ -174,10 +229,36 @@ export default function InterviewConsole({
           if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
             ws.close();
           }
-        } catch (_) {}
+        } catch (_) { }
       }, 500);
       assemblyAISocketRef.current = null;
     }
+
+    if (geminiLiveSocketRef.current) {
+      const ws = geminiLiveSocketRef.current;
+      setIsTranscribing(true);
+      setTimeout(() => {
+        try {
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
+        } catch (_) { }
+      }, 500);
+      geminiLiveSocketRef.current = null;
+    }
+
+    if (playAcRef.current) {
+      const pac = playAcRef.current;
+      setTimeout(() => {
+        try {
+          if (pac.state !== 'closed') {
+            pac.close();
+          }
+        } catch (_) { }
+      }, 500);
+      playAcRef.current = null;
+    }
+    playQRef.current = 0;
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
@@ -244,12 +325,152 @@ export default function InterviewConsole({
   // Text-To-Speech (TTS)
   const handleReadQuestion = () => {
     if (!question) return;
-    
+
     // Stop any ongoing speech
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
-    
+
+    // Safely close existing websocket or playback context
+    if (geminiLiveSocketRef.current) {
+      try {
+        geminiLiveSocketRef.current.onclose = null;
+        geminiLiveSocketRef.current.close();
+      } catch (_) { }
+      geminiLiveSocketRef.current = null;
+    }
+    if (playAcRef.current) {
+      try {
+        playAcRef.current.close();
+      } catch (_) { }
+      playAcRef.current = null;
+    }
+    playQRef.current = 0;
+
+    if (isLiveModel(geminiModel)) {
+      if (!apiKey) {
+        alert("Please provide a Gemini API Key in Settings to read the question with the live model.");
+        return;
+      }
+
+      setIsReadingQuestion(true);
+
+      try {
+        const outAc = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+        playAcRef.current = outAc;
+        playQRef.current = 0;
+
+        const playLiveChunk = (b64) => {
+          if (!playAcRef.current || playAcRef.current.state === 'closed') return;
+          if (playAcRef.current.state === 'suspended') {
+            playAcRef.current.resume();
+          }
+          const f32 = int16ToFloat32(base64ToInt16(b64));
+          const buf = playAcRef.current.createBuffer(1, f32.length, 24000);
+          buf.getChannelData(0).set(f32);
+
+          const src = playAcRef.current.createBufferSource();
+          src.buffer = buf;
+          src.connect(playAcRef.current.destination);
+
+          const now = playAcRef.current.currentTime;
+          if (playQRef.current < now) {
+            playQRef.current = now;
+          }
+          src.start(playQRef.current);
+          playQRef.current += buf.duration;
+        };
+
+        const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+        const ws = new WebSocket(wsUrl);
+        geminiLiveSocketRef.current = ws;
+
+        ws.onopen = () => {
+          console.log("Gemini Live TTS WebSocket connected.");
+          const modelName = `models/${geminiModel}`;
+          ws.send(JSON.stringify({
+            setup: {
+              model: modelName,
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } }
+                }
+              },
+              systemInstruction: {
+                parts: [{
+                  text: "You are a text-to-speech engine. Read the user's text exactly as provided, with no extra conversation, introductions, or pleasantries. Only speak the text itself."
+                }]
+              }
+            }
+          }));
+
+          ws.send(JSON.stringify({
+            clientContent: {
+              turns: [{
+                role: 'user',
+                parts: [{ text: question.text }]
+              }],
+              turnComplete: true
+            }
+          }));
+        };
+
+        ws.onmessage = async (evt) => {
+          let msg;
+          try {
+            const text = typeof evt.data === 'string' ? evt.data : await evt.data.text();
+            msg = JSON.parse(text);
+          } catch { return; }
+
+          const sc = msg?.serverContent;
+          if (!sc) return;
+
+          const parts = sc.modelTurn?.parts ?? [];
+          for (const part of parts) {
+            if (part.inlineData?.data) {
+              const mime = part.inlineData.mimeType ?? '';
+              if (mime.startsWith('audio/') || mime === '') {
+                playLiveChunk(part.inlineData.data);
+              }
+            }
+          }
+
+          if (sc.turnComplete) {
+            const delay = Math.max(0, (playQRef.current - outAc.currentTime) * 1000);
+            setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                ws.close();
+              }
+              setIsReadingQuestion(false);
+
+              const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+              const autoStartDelay = isMobile ? 1200 : 300;
+              setTimeout(() => {
+                if (isMountedRef.current) {
+                  handleStartRecording();
+                }
+              }, autoStartDelay);
+            }, delay + 100);
+          }
+        };
+
+        ws.onerror = (e) => {
+          console.error("Gemini Live TTS WebSocket error:", e);
+          setIsReadingQuestion(false);
+        };
+
+        ws.onclose = () => {
+          console.log("Gemini Live TTS WebSocket closed.");
+          setIsReadingQuestion(false);
+        };
+      } catch (err) {
+        console.error("Failed to start Gemini Live TTS:", err);
+        setIsReadingQuestion(false);
+      }
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(question.text);
     utterance.onstart = () => setIsReadingQuestion(true);
     utterance.onend = () => {
@@ -265,7 +486,7 @@ export default function InterviewConsole({
       }, delay);
     };
     utterance.onerror = () => setIsReadingQuestion(false);
-    
+
     window.speechSynthesis.speak(utterance);
   };
 
@@ -306,14 +527,14 @@ export default function InterviewConsole({
       }
       return buffer.buffer;
     }
-    
+
     const sampleRateRatio = inputSampleRate / outputSampleRate;
     const newLength = Math.round(float32Array.length / sampleRateRatio);
     const result = new Int16Array(newLength);
-    
+
     let offsetResult = 0;
     let offsetBuffer = 0;
-    
+
     while (offsetResult < result.length) {
       const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
       let accum = 0;
@@ -328,7 +549,7 @@ export default function InterviewConsole({
       offsetResult++;
       offsetBuffer = nextOffsetBuffer;
     }
-    
+
     return result.buffer;
   };
 
@@ -339,10 +560,10 @@ export default function InterviewConsole({
       const audioCtx = new AudioContext();
       const analyser = audioCtx.createAnalyser();
       const source = audioCtx.createMediaStreamSource(mediaStream);
-      
+
       source.connect(analyser);
       analyser.fftSize = 256;
-      
+
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
 
@@ -351,7 +572,7 @@ export default function InterviewConsole({
         scriptNode.onaudioprocess = (audioProcessingEvent) => {
           const inputBuffer = audioProcessingEvent.inputBuffer;
           const inputData = inputBuffer.getChannelData(0);
-          
+
           if (assemblyAISocketRef.current && assemblyAISocketRef.current.readyState === WebSocket.OPEN) {
             const pcmData = downsampleAndConvertToPCM16(inputData, audioCtx.sampleRate, 16000);
             assemblyAISocketRef.current.send(pcmData);
@@ -360,17 +581,43 @@ export default function InterviewConsole({
         source.connect(scriptNode);
         scriptNode.connect(audioCtx.destination);
         assemblyAIStreamNodeRef.current = scriptNode;
+      } else if (isLiveModel(geminiModel)) {
+        const scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+        scriptNode.onaudioprocess = (audioProcessingEvent) => {
+          const inputBuffer = audioProcessingEvent.inputBuffer;
+          const inputData = inputBuffer.getChannelData(0);
+
+          if (geminiLiveSocketRef.current && geminiLiveSocketRef.current.readyState === WebSocket.OPEN) {
+            const pcmBuffer = downsampleAndConvertToPCM16(inputData, audioCtx.sampleRate, 16000);
+            const b64Data = arrayBufferToBase64(pcmBuffer);
+            try {
+              geminiLiveSocketRef.current.send(JSON.stringify({
+                realtimeInput: {
+                  audio: {
+                    data: b64Data,
+                    mimeType: 'audio/pcm;rate=16000'
+                  }
+                }
+              }));
+            } catch (err) {
+              console.warn("Failed to send live audio chunk:", err);
+            }
+          }
+        };
+        source.connect(scriptNode);
+        scriptNode.connect(audioCtx.destination);
+        geminiLiveStreamNodeRef.current = scriptNode;
       }
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      
+
       let lastDrawTime = Date.now();
       const draw = () => {
         if (!analyserRef.current || !canvasRef.current) return;
-        
+
         drawLoopRef.current = requestAnimationFrame(draw);
-        
+
         const now = Date.now();
         if (now - lastDrawTime < 33) { // limit to ~30 FPS
           return;
@@ -378,14 +625,14 @@ export default function InterviewConsole({
         lastDrawTime = now;
 
         analyserRef.current.getByteFrequencyData(dataArray);
-        
+
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         const width = canvas.width;
         const height = canvas.height;
-        
+
         ctx.clearRect(0, 0, width, height);
-        
+
         // Calculate average volume
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) {
@@ -393,7 +640,7 @@ export default function InterviewConsole({
         }
         const avgVolume = sum / bufferLength;
         const volPct = Math.min(100, Math.round((avgVolume / 128) * 100));
-        
+
         // Direct DOM update instead of triggering React state updates
         if (volumeBarFillRef.current) {
           volumeBarFillRef.current.style.width = `${volPct}%`;
@@ -411,7 +658,7 @@ export default function InterviewConsole({
             breakRegisteredRef.current = false;
           } else {
             const silenceDuration = Date.now() - silenceStartRef.current;
-            
+
             // Check for mock mode 5-second silence auto-advance
             if (isMockMode && silenceDuration >= 5000) {
               inSilenceRef.current = false;
@@ -422,7 +669,7 @@ export default function InterviewConsole({
               }
               return;
             }
-            
+
             // Check if silence duration >= 1.5 seconds (1500 ms) and not already registered for this pause
             if (silenceDuration >= 1500 && !breakRegisteredRef.current) {
               breakRegisteredRef.current = true;
@@ -444,25 +691,25 @@ export default function InterviewConsole({
         // Draw visual wave
         ctx.fillStyle = 'rgba(13, 18, 30, 0.4)';
         ctx.fillRect(0, 0, width, height);
-        
+
         const barWidth = (width / bufferLength) * 2.5;
         let x = 0;
-        
+
         for (let i = 0; i < bufferLength; i++) {
           const barHeight = (dataArray[i] / 255) * height * 0.9;
-          
+
           // Gradient styling for visualizer
           const grad = ctx.createLinearGradient(0, height, 0, height - barHeight);
           grad.addColorStop(0, '#8b5cf6'); // purple
           grad.addColorStop(1, '#06b6d4'); // cyan
-          
+
           ctx.fillStyle = grad;
           ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
-          
+
           x += barWidth;
         }
       };
-      
+
       draw();
     } catch (e) {
       console.error('Error setting up Web Audio API:', e);
@@ -493,7 +740,7 @@ export default function InterviewConsole({
 
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
-    
+
     let url = '';
     let headers = {};
 
@@ -530,7 +777,7 @@ export default function InterviewConsole({
       try {
         const errJson = JSON.parse(errText);
         msg = errJson.detail?.message || errJson.error?.message || msg;
-      } catch (_) {}
+      } catch (_) { }
       throw new Error(msg);
     }
 
@@ -544,11 +791,11 @@ export default function InterviewConsole({
       setIsAnalyzing(false);
       return;
     }
-    
+
     setIsAnalyzing(true);
     const duration = forcedDuration !== null ? forcedDuration : (elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5);
     const breaks = forcedBreaks !== null ? forcedBreaks : breaksCountRef.current;
-    
+
     let report;
     if (apiKey) {
       const { analyzeTranscriptWithGemini } = await import('../utils/aiEngine');
@@ -557,7 +804,7 @@ export default function InterviewConsole({
       const { analyzeTranscriptLocally } = await import('../utils/aiEngine');
       report = analyzeTranscriptLocally(finalTranscript, question, duration);
     }
-    
+
     report.totalDuration = duration;
     report.breaksCount = breaks;
     report.question = question;
@@ -569,7 +816,7 @@ export default function InterviewConsole({
   // Speech Recognition (STT) & Recording Loop
   const handleStartRecording = async () => {
     if (isRecording) return;
-    
+
     // Cancel any active Speech Synthesis to prevent device-in-use conflicts
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
@@ -580,7 +827,7 @@ export default function InterviewConsole({
     if (isMobileDevice) {
       await new Promise(resolve => setTimeout(resolve, 800));
     }
-    
+
     // Reset trackers
     setTranscript('');
     setElapsedTime(0);
@@ -592,7 +839,7 @@ export default function InterviewConsole({
     prevTranscriptRef.current = '';
     sessionFinalRef.current = '';
     transcriptRef.current = '';
-    
+
     if (onTranscriptChange) onTranscriptChange('');
     if (onTimeChange) onTimeChange(0);
     if (onBreaksChange) onBreaksChange(0);
@@ -671,7 +918,7 @@ export default function InterviewConsole({
           }
         }
         sessionFinalRef.current = sessionFinal;
-        
+
         const rawText = (prevTranscriptRef.current + ' ' + sessionFinal + ' ' + sessionInterim).trim().replace(/\s+/g, ' ');
         const formattedText = capitalizeSentences(rawText);
         setTranscript(formattedText);
@@ -682,7 +929,7 @@ export default function InterviewConsole({
       rec.onerror = (e) => {
         console.error("Speech Recognition Error:", e);
         const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        
+
         if (isMobile && e.error !== 'no-speech') {
           console.warn(`Speech recognition error '${e.error}' on mobile. Switching to Puter.js fallback...`);
           setSpeechError("Google Speech Services error on mobile. Switched speech engine to Puter.js. Please tap start recording again.");
@@ -756,17 +1003,110 @@ export default function InterviewConsole({
       }
     };
 
-    if (sttProvider === 'assemblyai' && !isTypingMode) {
+    if (isLiveModel(geminiModel) && !isTypingMode) {
+      try {
+        if (!apiKey) {
+          throw new Error("Gemini API Key is required. Please set it in Settings.");
+        }
+
+        const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+        const ws = new WebSocket(wsUrl);
+        geminiLiveSocketRef.current = ws;
+
+        ws.onopen = () => {
+          console.log("Gemini Live STT WebSocket connected.");
+          const modelName = `models/${geminiModel}`;
+          ws.send(JSON.stringify({
+            setup: {
+              model: modelName,
+              generationConfig: {
+                responseModalities: ['TEXT'],
+              },
+              inputAudioTranscription: {},
+              systemInstruction: {
+                parts: [{
+                  text: "You are a speech-to-text transcription engine. Just transcribe the user's speech. Do not respond to it. Stay completely silent."
+                }]
+              }
+            }
+          }));
+        };
+
+        let finalizedTranscript = '';
+
+        ws.onmessage = async (evt) => {
+          let msg;
+          try {
+            const text = typeof evt.data === 'string' ? evt.data : await evt.data.text();
+            msg = JSON.parse(text);
+          } catch { return; }
+
+          const sc = msg?.serverContent;
+          if (!sc) return;
+
+          // Capture input transcription (what user spoke)
+          if (sc.inputTranscription?.text) {
+            const chunk = sc.inputTranscription.text;
+            finalizedTranscript = (finalizedTranscript + ' ' + chunk).trim().replace(/\s+/g, ' ');
+            const formatted = capitalizeSentences(finalizedTranscript);
+
+            setTranscript(formatted);
+            transcriptRef.current = formatted;
+            if (onTranscriptChange) onTranscriptChange(formatted);
+          }
+        };
+
+        ws.onerror = (err) => {
+          console.error("Gemini Live STT WebSocket error:", err);
+          setSpeechError("Gemini Live streaming error occurred.");
+        };
+
+        ws.onclose = () => {
+          console.log("Gemini Live STT WebSocket closed.");
+          handleSessionEnd();
+        };
+
+        let sessionEnded = false;
+        const handleSessionEnd = () => {
+          if (sessionEnded) return;
+          sessionEnded = true;
+
+          setIsTranscribing(false);
+          const act = pendingActionRef.current;
+          pendingActionRef.current = null;
+
+          const text = transcriptRef.current;
+
+          if (act === 'analyze') {
+            runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
+          } else if (act === 'next' || act === 'autoadvance') {
+            const finalVal = text.trim() || (act === 'autoadvance' ? "(No response - failed within 5s silence limit)" : "");
+            onNextQuestion({
+              question,
+              transcript: finalVal,
+              duration: elapsedTimeRef.current > 0 ? elapsedTimeRef.current : 5,
+              breaksCount: breaksCountRef.current
+            });
+          }
+        };
+
+      } catch (err) {
+        console.error("Gemini Live STT start failed:", err);
+        setSpeechError(`Gemini Live STT start failed: ${err.message}`);
+        stopRecording();
+        return;
+      }
+    } else if (sttProvider === 'assemblyai' && !isTypingMode) {
       try {
         if (!sttApiKey) {
           throw new Error("AssemblyAI API Key is required. Please set it in the header.");
         }
-        
+
         let token;
         try {
           const tokenRes = await fetch('https://api.assemblyai.com/v2/realtime/token', {
             method: 'POST',
-            headers: { 
+            headers: {
               'Authorization': sttApiKey,
               'Content-Type': 'application/json'
             },
@@ -782,7 +1122,7 @@ export default function InterviewConsole({
           try {
             const tokenRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://api.assemblyai.com/v2/realtime/token')}`, {
               method: 'POST',
-              headers: { 
+              headers: {
                 'Authorization': sttApiKey,
                 'Content-Type': 'application/json'
               },
@@ -795,31 +1135,31 @@ export default function InterviewConsole({
             throw new Error("AssemblyAI requires a backend or CORS proxy to generate real-time tokens. Please use 'Web Browser Native API', 'Groq Whisper Engine', 'OpenAI Whisper Cloud', or 'Puter.js Speech API' instead.");
           }
         }
-        
+
         const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${token}&speech_model=universal-streaming-english&sample_rate=16000`;
         const socket = new WebSocket(wsUrl);
         assemblyAISocketRef.current = socket;
-        
+
         socket.onopen = () => {
           console.log("AssemblyAI WebSocket connected.");
         };
 
         let finalizedTranscript = '';
-        
+
         socket.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'Turn') {
               const text = msg.transcript || '';
               const isFinal = msg.end_of_turn;
-              
+
               const currentRaw = (finalizedTranscript + ' ' + text).trim().replace(/\s+/g, ' ');
               const formatted = capitalizeSentences(currentRaw);
-              
+
               setTranscript(formatted);
               transcriptRef.current = formatted;
               if (onTranscriptChange) onTranscriptChange(formatted);
-              
+
               if (isFinal) {
                 finalizedTranscript = (finalizedTranscript + ' ' + text).trim();
               }
@@ -846,13 +1186,13 @@ export default function InterviewConsole({
         const handleSessionEnd = () => {
           if (sessionEnded) return;
           sessionEnded = true;
-          
+
           setIsTranscribing(false);
           const act = pendingActionRef.current;
           pendingActionRef.current = null;
-          
+
           const text = transcriptRef.current;
-          
+
           if (act === 'analyze') {
             runAnalysis(text, elapsedTimeRef.current, breaksCountRef.current);
           } else if (act === 'next' || act === 'autoadvance') {
@@ -875,14 +1215,14 @@ export default function InterviewConsole({
     } else if (sttProvider === 'native' && !isTypingMode) {
       nativeFailedRef.current = false;
       audioChunksRef.current = [];
-      
+
       const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       if (!isMobile) {
         try {
           const mediaRecorder = new MediaRecorder(micStreamRef.current, {
             mimeType: 'audio/webm'
           });
-          
+
           mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               audioChunksRef.current.push(event.data);
@@ -900,7 +1240,7 @@ export default function InterviewConsole({
               setIsAdvancing(false);
               return;
             }
-            
+
             setIsTranscribing(true);
             setSpeechError(null);
             try {
@@ -909,7 +1249,7 @@ export default function InterviewConsole({
               setTranscript(text);
               transcriptRef.current = text;
               if (onTranscriptChange) onTranscriptChange(text);
-              
+
               const act = pendingActionRef.current;
               pendingActionRef.current = null;
               if (act === 'analyze') {
@@ -941,7 +1281,7 @@ export default function InterviewConsole({
       } else {
         console.log("Mobile device detected. Skipping concurrent background MediaRecorder for native STT to avoid device locks.");
       }
-      
+
       startSpeechRecognitionInstance();
     } else if (sttProvider !== 'native' && !isTypingMode) {
       audioChunksRef.current = [];
@@ -949,7 +1289,7 @@ export default function InterviewConsole({
         const mediaRecorder = new MediaRecorder(micStreamRef.current, {
           mimeType: 'audio/webm'
         });
-        
+
         mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
             audioChunksRef.current.push(event.data);
@@ -962,7 +1302,7 @@ export default function InterviewConsole({
             setIsAdvancing(false);
             return;
           }
-          
+
           setIsTranscribing(true);
           setSpeechError(null);
           try {
@@ -970,7 +1310,7 @@ export default function InterviewConsole({
             setTranscript(text);
             transcriptRef.current = text;
             if (onTranscriptChange) onTranscriptChange(text);
-            
+
             const act = pendingActionRef.current;
             pendingActionRef.current = null;
             if (act === 'analyze') {
@@ -1016,7 +1356,7 @@ export default function InterviewConsole({
 
   // Submit response for analysis
   const handleAnalyze = async () => {
-    if (sttProvider !== 'native' && !isTypingMode) {
+    if ((isLiveModel(geminiModel) || sttProvider !== 'native') && !isTypingMode) {
       pendingActionRef.current = 'analyze';
       stopRecording();
       setIsAnalyzing(true);
@@ -1033,7 +1373,7 @@ export default function InterviewConsole({
 
   const handleNext = () => {
     setIsAdvancing(true);
-    if (sttProvider !== 'native' && !isTypingMode) {
+    if ((isLiveModel(geminiModel) || sttProvider !== 'native') && !isTypingMode) {
       pendingActionRef.current = 'next';
       stopRecording();
     } else {
@@ -1054,7 +1394,7 @@ export default function InterviewConsole({
 
   const handleAutoAdvance = () => {
     setIsAdvancing(true);
-    if (sttProvider !== 'native' && !isTypingMode) {
+    if ((isLiveModel(geminiModel) || sttProvider !== 'native') && !isTypingMode) {
       pendingActionRef.current = 'autoadvance';
       stopRecording();
     } else {
@@ -1083,7 +1423,7 @@ export default function InterviewConsole({
           </div>
           <div className="current-question-body">{question?.text || 'No question selected. Select one from the sidebar.'}</div>
         </div>
-        <button 
+        <button
           className={`btn btn-secondary ${isReadingQuestion ? 'pulse-button' : ''}`}
           onClick={handleReadQuestion}
           disabled={!question || isReadingQuestion || isRecording}
@@ -1150,8 +1490,8 @@ export default function InterviewConsole({
             <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>
               {isTypingMode ? 'Response Editor' : 'Audio Visualizer'}
             </h3>
-            <button 
-              className="btn btn-secondary" 
+            <button
+              className="btn btn-secondary"
               onClick={() => {
                 if (isRecording) stopRecording();
                 setIsTypingMode(!isTypingMode);
@@ -1163,7 +1503,7 @@ export default function InterviewConsole({
               {isTypingMode ? 'Use Voice' : 'Switch to Typing'}
             </button>
           </div>
-          
+
           {isTypingMode ? (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '0.75rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -1231,7 +1571,7 @@ export default function InterviewConsole({
                   </span>
                   <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>pauses &gt; 1.5s</span>
                 </div>
-                
+
                 <div className="glass-card" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Words Spoken</span>
                   <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'white' }}>
@@ -1244,22 +1584,26 @@ export default function InterviewConsole({
               {/* Live Transcript Display */}
               <div style={{ marginTop: '0.75rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                  {sttProvider === 'native' 
-                    ? 'Live Transcript:' 
-                    : sttProvider === 'assemblyai'
-                    ? 'AssemblyAI Live Transcript (Universal Streaming):'
-                    : sttProvider === 'elevenlabs' 
-                    ? 'ElevenLabs Transcript (processed on stop):' 
-                    : sttProvider === 'puter'
-                    ? 'Puter.js Transcript (processed on stop):'
-                    : 'Whisper Transcript (processed on stop):'}
+                  {isLiveModel(geminiModel)
+                    ? 'Gemini Live Transcript (Real-time WebSocket):'
+                    : sttProvider === 'native'
+                      ? 'Live Transcript:'
+                      : sttProvider === 'assemblyai'
+                        ? 'AssemblyAI Live Transcript (Universal Streaming):'
+                        : sttProvider === 'elevenlabs'
+                          ? 'ElevenLabs Transcript (processed on stop):'
+                          : sttProvider === 'puter'
+                            ? 'Puter.js Transcript (processed on stop):'
+                            : 'Whisper Transcript (processed on stop):'}
                 </span>
                 <div className="transcript-panel">
                   {isTranscribing ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
                       <RefreshCw size={14} className="animate-spin text-primary" />
                       <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>
-                        Transcribing with {sttProvider === 'groq' ? 'Groq' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'puter' ? 'Puter.js' : sttProvider === 'assemblyai' ? 'AssemblyAI' : 'OpenAI'}...
+                        {isLiveModel(geminiModel)
+                          ? 'Finalizing Gemini Live Transcript...'
+                          : `Transcribing with ${sttProvider === 'groq' ? 'Groq' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'puter' ? 'Puter.js' : sttProvider === 'assemblyai' ? 'AssemblyAI' : 'OpenAI'}...`}
                       </span>
                     </div>
                   ) : speechError ? (
@@ -1294,12 +1638,14 @@ export default function InterviewConsole({
                     <span>{bionicReading ? renderBionicText(transcript) : transcript}</span>
                   ) : (
                     <span className="transcript-placeholder">
-                      {isRecording 
-                        ? (sttProvider === 'native' 
-                            ? "Listening... Speak your answer now." 
+                      {isRecording
+                        ? (isLiveModel(geminiModel)
+                          ? "🔴 Recording... Streaming live to Gemini Live API."
+                          : sttProvider === 'native'
+                            ? "Listening... Speak your answer now."
                             : sttProvider === 'assemblyai'
-                            ? "🔴 Recording... Streaming live to AssemblyAI."
-                            : `🔴 Recording... Your speech will be transcribed with ${sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'puter' ? 'Puter.js' : 'Whisper'} on stop.`)
+                              ? "🔴 Recording... Streaming live to AssemblyAI."
+                              : `🔴 Recording... Your speech will be transcribed with ${sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'puter' ? 'Puter.js' : 'Whisper'} on stop.`)
                         : "Click 'Start Practice' to record your response."}
                     </span>
                   )}
@@ -1315,8 +1661,8 @@ export default function InterviewConsole({
         {!isRecording ? (
           <>
             {isMockMode && (
-              <button 
-                className="btn btn-secondary" 
+              <button
+                className="btn btn-secondary"
                 onClick={() => {
                   if (window.confirm("Are you sure you want to exit the mock interview? All progress will be lost.")) {
                     stopRecording();
@@ -1328,8 +1674,8 @@ export default function InterviewConsole({
                 Exit Mock
               </button>
             )}
-            <button 
-              className="btn btn-primary pulse-button" 
+            <button
+              className="btn btn-primary pulse-button"
               onClick={handleStartRecording}
               disabled={!question || isAnalyzing || isReadingQuestion}
               style={{ padding: '0.85rem 2rem', marginLeft: isMockMode ? 'auto' : '0' }}
@@ -1340,8 +1686,8 @@ export default function InterviewConsole({
           </>
         ) : (
           <>
-            <button 
-              className="btn btn-danger" 
+            <button
+              className="btn btn-danger"
               onClick={() => {
                 if (isMockMode) {
                   if (window.confirm("Exit mock interview? Current progress will be lost.")) {
@@ -1357,8 +1703,8 @@ export default function InterviewConsole({
               {isMockMode ? 'Exit Mock' : isTypingMode ? 'Cancel Typing' : 'Cancel Practice'}
             </button>
             {isMockMode ? (
-              <button 
-                className="btn btn-accent" 
+              <button
+                className="btn btn-accent"
                 onClick={handleNext}
                 disabled={isTranscribing || isAdvancing}
                 style={{ padding: '0.85rem 2rem', marginLeft: 'auto' }}
@@ -1378,8 +1724,8 @@ export default function InterviewConsole({
                 )}
               </button>
             ) : (
-              <button 
-                className="btn btn-accent" 
+              <button
+                className="btn btn-accent"
                 onClick={handleAnalyze}
                 disabled={isAnalyzing || isTranscribing}
                 style={{ padding: '0.85rem 2rem', marginLeft: 'auto' }}
