@@ -711,7 +711,7 @@ function App() {
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (High Accuracy Reasoning)</option>
                   <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced Speed)</option>
                   <option value="gemini-3.5-flash">Gemini 3.5 Flash (Agentic Coding)</option>
-                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Low Cost)</option>
+                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Low Cost)</option>
                   <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Low Latency)</option>
                   <option value="gemini-3-flash">Gemini 3 Flash (Cost Effective)</option>
                   <option value="gemini-2.5-flash-audio">Gemini 2.5 Flash Native Audio Dialog (Native Voice)</option>
