@@ -28,7 +28,7 @@ function App() {
     }
     return null;
   });
-  const [questions, setQuestions] = useState([]);
+  const [questions, setQuestions] = useState(PRESETS);
   const [activeQuestion, setActiveQuestion] = useState(null);
   const [assessmentReport, setAssessmentReport] = useState(null);
   const [apiKey, setApiKey] = useState(() => {
@@ -139,6 +139,7 @@ function App() {
   const [mockAnswers, setMockAnswers] = useState([]);
   const [mockReport, setMockReport] = useState(null);
   const [mockTimeRemaining, setMockTimeRemaining] = useState(0);
+  const [loadingQuestion, setLoadingQuestion] = useState(false);
 
   // Refs for tracking real-time answer progress to submit on timeout
   const currentAnswerRef = useRef({ transcript: '', elapsedTime: 0, breaksCount: 0 });
@@ -280,36 +281,113 @@ function App() {
   };
 
   // Mock Interview Actions
-  const handleStartMock = (config) => {
+  const handleStartMock = async (config) => {
     setMockConfig(config);
-    const pool = questions.filter(q => config.categories.includes(q.category || 'General'));
-    // Randomize all questions matching categories
-    const shuffled = [...pool].sort(() => 0.5 - Math.random());
-    
-    setMockQuestions(shuffled);
+    setMockQuestions([]);
     setCurrentMockIndex(0);
     setMockAnswers([]);
     setMockReport(null);
     setMockTimeRemaining(config.durationLimit);
     setMockStatus('interview');
     currentAnswerRef.current = { transcript: '', elapsedTime: 0, breaksCount: 0 };
+
+    setLoadingQuestion(true);
+    try {
+      const { generateNextMockQuestion } = await import('./utils/aiEngine');
+      const firstQuestionObj = await generateNextMockQuestion(config.topics, [], 'Medium', apiKey, geminiModel);
+      
+      const questionData = {
+        id: `dynamic-${Date.now()}-0`,
+        category: firstQuestionObj.category || config.topics[0],
+        text: firstQuestionObj.text,
+        keywords: firstQuestionObj.keywords || [],
+        suggestedAnswer: firstQuestionObj.suggestedAnswer || '',
+        difficulty: firstQuestionObj.difficulty || 'Medium'
+      };
+      
+      setMockQuestions([questionData]);
+    } catch (err) {
+      console.error("Error generating first question:", err);
+      // Local fallback using selected topics
+      const pool = questions.filter(q => config.topics.some(topic => (q.category || '').toLowerCase().includes(topic.toLowerCase())));
+      const shuffled = [...pool].sort(() => 0.5 - Math.random());
+      if (shuffled.length === 0) {
+        shuffled.push(PRESETS[0]);
+      }
+      setMockQuestions(shuffled);
+    } finally {
+      setLoadingQuestion(false);
+    }
   };
 
-  const handleNextMockQuestion = (answer) => {
-    // Reset tracker for the next question
+  const handleNextMockQuestion = async (answer) => {
     currentAnswerRef.current = { transcript: '', elapsedTime: 0, breaksCount: 0 };
-    
-    const updatedAnswers = [...mockAnswers, answer];
-    setMockAnswers(updatedAnswers);
-    
-    // Check if time is already up or if we reached the end of the question pool
-    if (mockTimeRemaining <= 0) {
-      handleEvaluateMock(updatedAnswers);
-    } else if (currentMockIndex < mockQuestions.length - 1) {
-      setCurrentMockIndex(currentMockIndex + 1);
-    } else {
-      // Completed all questions in the pool
-      handleEvaluateMock(updatedAnswers);
+    setLoadingQuestion(true);
+
+    try {
+      const { evaluateMockQuestionAnswer, generateNextMockQuestion } = await import('./utils/aiEngine');
+      const evaluation = await evaluateMockQuestionAnswer(
+        answer.question,
+        answer.transcript,
+        answer.duration,
+        apiKey,
+        geminiModel
+      );
+
+      const evaluatedAnswer = {
+        ...answer,
+        score: evaluation.score,
+        grammarMistakes: evaluation.grammarMistakes,
+        theoryMistakes: evaluation.theoryMistakes,
+        wpm: evaluation.wpm,
+        feedback: evaluation.feedback
+      };
+
+      const updatedAnswers = [...mockAnswers, evaluatedAnswer];
+      setMockAnswers(updatedAnswers);
+
+      const reachedMaxQuestions = updatedAnswers.length >= (mockConfig?.questionCount || 5);
+      if (mockTimeRemaining <= 0 || reachedMaxQuestions) {
+        await handleEvaluateMock(updatedAnswers);
+      } else {
+        const lastScore = evaluation.score;
+        let nextDifficulty = answer.question.difficulty || 'Medium';
+        if (lastScore >= 80) {
+          if (nextDifficulty === 'Easy') nextDifficulty = 'Medium';
+          else if (nextDifficulty === 'Medium') nextDifficulty = 'Hard';
+        } else if (lastScore < 60) {
+          if (nextDifficulty === 'Hard') nextDifficulty = 'Medium';
+          else if (nextDifficulty === 'Medium') nextDifficulty = 'Easy';
+        }
+
+        const nextQuestionObj = await generateNextMockQuestion(
+          mockConfig.topics,
+          mockQuestions,
+          nextDifficulty,
+          apiKey,
+          geminiModel
+        );
+
+        const nextQuestionData = {
+          id: `dynamic-${Date.now()}-${updatedAnswers.length}`,
+          category: nextQuestionObj.category || mockConfig.topics[0],
+          text: nextQuestionObj.text,
+          keywords: nextQuestionObj.keywords || [],
+          suggestedAnswer: nextQuestionObj.suggestedAnswer || '',
+          difficulty: nextQuestionObj.difficulty || nextDifficulty
+        };
+
+        setMockQuestions(prev => [...prev, nextQuestionData]);
+        setCurrentMockIndex(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error("Error transitioning to next mock question:", err);
+      alert("Error generating next question. Compiling results so far.");
+      const updatedAnswers = [...mockAnswers, { ...answer, score: 70 }];
+      setMockAnswers(updatedAnswers);
+      await handleEvaluateMock(updatedAnswers);
+    } finally {
+      setLoadingQuestion(false);
     }
   };
 
@@ -381,11 +459,11 @@ function App() {
     try {
       let reportResult = null;
       if (apiKey) {
-        const { analyzeMockInterviewWithGemini } = await import('./utils/aiEngine');
-        reportResult = await analyzeMockInterviewWithGemini(answers, apiKey, geminiModel);
+        const { compileFinalMockReport } = await import('./utils/aiEngine');
+        reportResult = await compileFinalMockReport(answers, mockConfig?.topics || [], apiKey, geminiModel);
       } else {
-        const { analyzeMockInterviewLocally } = await import('./utils/aiEngine');
-        reportResult = analyzeMockInterviewLocally(answers);
+        const { compileFinalReportLocally } = await import('./utils/aiEngine');
+        reportResult = compileFinalReportLocally(answers, mockConfig?.topics || []);
       }
 
       // Save report with backup queue
@@ -816,6 +894,7 @@ function App() {
               localStorage.removeItem('verbalyst_user');
               localStorage.removeItem('verbalyst_login_timestamp');
               setUser(null);
+              setQuestions(PRESETS);
               setSettingsOpen(false);
             }}
             className="btn btn-danger"
@@ -943,11 +1022,12 @@ function App() {
                 </div>
 
                 <div className="timeline-list">
-                  {mockQuestions.map((q, idx) => {
+                  {Array.from({ length: mockConfig?.questionCount || 5 }).map((_, idx) => {
+                    const q = mockQuestions[idx];
                     const isCompleted = idx < currentMockIndex;
                     const isActive = idx === currentMockIndex;
-                    // Only render questions that are completed or the active one
-                    if (!isCompleted && !isActive) return null;
+                    const isFuture = idx > currentMockIndex;
+                    
                     return (
                       <div 
                         key={idx}
@@ -955,6 +1035,7 @@ function App() {
                         style={{
                           borderColor: isActive ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.03)',
                           background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'rgba(255, 255, 255, 0.01)',
+                          opacity: isFuture ? 0.4 : 1
                         }}
                       >
                         <div className={`timeline-step-indicator ${isCompleted ? 'completed' : isActive ? 'active' : ''}`}>
@@ -962,10 +1043,10 @@ function App() {
                         </div>
                         <div style={{ minWidth: 0 }}>
                           <span style={{ fontSize: '0.65rem', color: isActive ? 'var(--primary)' : 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            {isActive ? 'ACTIVE QUESTION' : 'COMPLETED'}
+                            {isActive ? 'ACTIVE QUESTION' : isCompleted ? 'COMPLETED' : 'UPCOMING'}
                           </span>
                           <p style={{ fontSize: '0.82rem', fontWeight: 500, margin: '2px 0 0 0', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {q.text}
+                            {isActive && loadingQuestion ? 'Formulating question...' : q ? q.text : 'Pending generation...'}
                           </p>
                         </div>
                       </div>
@@ -1023,7 +1104,6 @@ function App() {
             <>
               {mockStatus === 'setup' && (
                 <MockInterviewSetup 
-                  questions={questions} 
                   onStart={handleStartMock} 
                 />
               )}
@@ -1043,12 +1123,13 @@ function App() {
                   }}
                   isMockMode={true}
                   currentMockIndex={currentMockIndex}
-                  totalMockQuestions={mockQuestions.length}
+                  totalMockQuestions={mockConfig?.questionCount || 5}
                   onNextQuestion={handleNextMockQuestion}
                   onCancelMock={handleCancelMock}
                   onTranscriptChange={(text) => { currentAnswerRef.current.transcript = text; }}
                   onTimeChange={(sec) => { currentAnswerRef.current.elapsedTime = sec; }}
                   onBreaksChange={(cnt) => { currentAnswerRef.current.breaksCount = cnt; }}
+                  loadingQuestion={loadingQuestion}
                 />
               )}
               {mockStatus === 'analyzing' && (

@@ -101,7 +101,8 @@ export default function InterviewConsole({
   showTimer = true,
   showCalibration = true,
   bionicReading = false,
-  onSttProviderChange
+  onSttProviderChange,
+  loadingQuestion = false
 }) {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isReadingQuestion, setIsReadingQuestion] = useState(false);
@@ -115,6 +116,12 @@ export default function InterviewConsole({
   const [isBrave, setIsBrave] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const [showIdealAnswer, setShowIdealAnswer] = useState(false);
+
+  // Reset showIdealAnswer on question change
+  useEffect(() => {
+    setShowIdealAnswer(false);
+  }, [question]);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -1413,6 +1420,27 @@ export default function InterviewConsole({
     handleAutoAdvanceRef.current = handleAutoAdvance;
   });
 
+  if (loadingQuestion) {
+    return (
+      <div className="glass-panel" style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        minHeight: '400px',
+        gap: '1.5rem',
+        textAlign: 'center',
+        padding: '2rem'
+      }}>
+        <RefreshCw size={48} className="animate-spin text-secondary" />
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>AI Interviewer is formulating the next question...</h3>
+        <p style={{ color: 'var(--text-muted)', maxWidth: '400px' }}>
+          Please wait while the AI interviewer evaluates your previous answer, dynamically adjusts the difficulty, and prepares the next question.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="arena-grid">
       {/* Current Question Banner */}
@@ -1428,11 +1456,34 @@ export default function InterviewConsole({
           onClick={handleReadQuestion}
           disabled={!question || isReadingQuestion || isRecording}
           title="Listen to question"
+          style={{ whiteSpace: 'nowrap' }}
         >
           <Volume2 size={18} />
           {isReadingQuestion ? 'Speaking...' : 'Read Aloud'}
         </button>
       </div>
+
+      {isMockMode && question?.suggestedAnswer && (
+        <div className="glass-card" style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(6, 182, 212, 0.03)', borderColor: 'rgba(6, 182, 212, 0.15)', fontSize: '0.85rem', gridColumn: 'span 2' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <span style={{ color: 'var(--text-muted)' }}>AI Coach has prepared a hidden reference answer for this question.</span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowIdealAnswer(!showIdealAnswer)}
+              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', height: 'auto', borderRadius: '4px' }}
+            >
+              {showIdealAnswer ? 'Hide Reference' : 'Reveal Reference Answer'}
+            </button>
+          </div>
+          {showIdealAnswer && (
+            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.5rem', color: 'white', lineHeight: '1.45' }}>
+              <strong>Ideal Reference Answer:</strong>
+              <p style={{ marginTop: '0.25rem' }}>{question.suggestedAnswer}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Media Console */}
       <div className="media-console">

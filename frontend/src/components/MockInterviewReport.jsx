@@ -5,6 +5,10 @@ export default function MockInterviewReport({ report, onReset, backLabel }) {
   const [expandedQuestion, setExpandedQuestion] = useState(0); // expand first question by default
   const [copied, setCopied] = useState(false);
   const [checkedTasks, setCheckedTasks] = useState({});
+  const [revealOverallScore, setRevealOverallScore] = useState(true);
+  const [revealTopicScores, setRevealTopicScores] = useState(true);
+  const [revealReviews, setRevealReviews] = useState(true);
+  const [revealQuestionScores, setRevealQuestionScores] = useState({});
 
   const toggleTask = (idx) => {
     setCheckedTasks(prev => ({ ...prev, [idx]: !prev[idx] }));
@@ -12,6 +16,10 @@ export default function MockInterviewReport({ report, onReset, backLabel }) {
 
   const toggleExpand = (index) => {
     setExpandedQuestion(expandedQuestion === index ? null : index);
+  };
+
+  const toggleRevealQuestionScore = (idx) => {
+    setRevealQuestionScores(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
   const formatTime = (secs) => {
@@ -95,31 +103,57 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
                   cy="60" 
                   r="50" 
                   fill="transparent" 
-                  stroke={getScoreColor(report.score)} 
+                  stroke={revealOverallScore ? getScoreColor(report.score ?? 0) : 'var(--text-dim)'} 
                   strokeWidth="8" 
                   strokeDasharray={`${2 * Math.PI * 50}`}
-                  strokeDashoffset={`${2 * Math.PI * 50 * (1 - report.score / 100)}`}
+                  strokeDashoffset={revealOverallScore ? `${2 * Math.PI * 50 * (1 - (report.score ?? 0) / 100)}` : `${2 * Math.PI * 50 * 0.9}`}
                   strokeLinecap="round"
-                  style={{ filter: `drop-shadow(0 0 6px ${getScoreColor(report.score)}80)` }}
+                  style={{ filter: revealOverallScore ? `drop-shadow(0 0 6px ${getScoreColor(report.score ?? 0)}80)` : 'none' }}
                 />
               </svg>
               <div style={{ position: 'absolute', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <span style={{ fontSize: '2.25rem', fontWeight: 800, color: 'white' }}>{report.score}</span>
+                <span style={{ fontSize: revealOverallScore ? '2.25rem' : '1.5rem', fontWeight: 800, color: 'white' }}>
+                  {revealOverallScore ? (report.score ?? 0) : '??'}
+                </span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>/ 100</span>
               </div>
             </div>
 
-            <span style={{ 
-              fontSize: '0.75rem', 
-              fontWeight: 700, 
-              background: `${getScoreColor(report.score)}15`,
-              color: getScoreColor(report.score),
-              border: `1px solid ${getScoreColor(report.score)}30`,
-              padding: '2px 8px', 
-              borderRadius: '12px' 
-            }}>
-              {report.score >= 80 ? 'EXCELLENT' : report.score >= 60 ? 'COMPETENT' : 'NEEDS PRACTICE'}
-            </span>
+            {revealOverallScore ? (
+              <span style={{ 
+                fontSize: '0.75rem', 
+                fontWeight: 700, 
+                background: `${getScoreColor(report.score ?? 0)}15`,
+                color: getScoreColor(report.score ?? 0),
+                border: `1px solid ${getScoreColor(report.score ?? 0)}30`,
+                padding: '2px 8px', 
+                borderRadius: '12px',
+                marginBottom: '0.5rem'
+              }}>
+                {(report.score ?? 0) >= 80 ? 'EXCELLENT' : (report.score ?? 0) >= 60 ? 'COMPETENT' : 'NEEDS PRACTICE'}
+              </span>
+            ) : (
+              <span style={{ 
+                fontSize: '0.75rem', 
+                fontWeight: 700, 
+                background: 'rgba(255,255,255,0.05)',
+                color: 'var(--text-dim)',
+                border: '1px solid var(--border-light)',
+                padding: '2px 8px', 
+                borderRadius: '12px',
+                marginBottom: '0.5rem'
+              }}>
+                RATING HIDDEN
+              </span>
+            )}
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => setRevealOverallScore(!revealOverallScore)}
+              style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem', height: 'auto', borderRadius: '4px' }}
+            >
+              {revealOverallScore ? 'Hide Rating' : 'Reveal Rating'}
+            </button>
           </div>
 
           {/* Right: Key Telemetry Metrics */}
@@ -184,27 +218,128 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
           )}
         </div>
 
-        {/* Behavior and Bluffing Review */}
-        <div className="grid-2col">
-          <div className="glass-card" style={{ padding: '1.25rem', borderLeft: '4px solid var(--secondary)', background: 'rgba(6, 182, 212, 0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <Award size={16} className="text-secondary" />
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white' }}>Behavior & Confidence Review</h4>
+        {/* Topic-wise Scores */}
+        {report.topicScores && report.topicScores.length > 0 && (
+          <div className="glass-card" style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'white' }}>Topic-wise Performance Scores</h3>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setRevealTopicScores(!revealTopicScores)}
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', height: 'auto', borderRadius: '4px' }}
+              >
+                {revealTopicScores ? 'Hide Topic Scores' : 'Reveal Topic Scores'}
+              </button>
             </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
-              {report.behavioralAssessment || 'No feedback logged.'}
-            </p>
+
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', 
+              gap: '1rem',
+              filter: revealTopicScores ? 'none' : 'blur(4px)',
+              pointerEvents: revealTopicScores ? 'auto' : 'none',
+              transition: 'all 0.3s ease'
+            }}>
+              {report.topicScores.map((ts, idx) => (
+                <div key={idx} className="glass-card" style={{ padding: '1rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white' }}>{ts.topic}</span>
+                    <span style={{ fontSize: '1rem', fontWeight: 800, color: getScoreColor(ts.score) }}>{ts.score}%</span>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>{ts.explanation}</span>
+                </div>
+              ))}
+            </div>
+
+            {!revealTopicScores && (
+              <div style={{ 
+                position: 'absolute', 
+                top: 0, 
+                left: 0, 
+                right: 0, 
+                bottom: 0, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                background: 'rgba(0,0,0,0.4)',
+                zIndex: 10
+              }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setRevealTopicScores(true)}
+                  style={{ padding: '0.6rem 1.2rem', borderRadius: '8px' }}
+                >
+                  Reveal Topic Scores
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Behavior and Bluffing Review */}
+        <div className="glass-card" style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'white' }}>Detailed Behavioral & Authenticity Reviews</h3>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setRevealReviews(!revealReviews)}
+              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', height: 'auto', borderRadius: '4px' }}
+            >
+              {revealReviews ? 'Hide Reviews' : 'Reveal Reviews'}
+            </button>
           </div>
 
-          <div className="glass-card" style={{ padding: '1.25rem', borderLeft: '4px solid var(--danger)', background: 'rgba(239, 68, 68, 0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <AlertTriangle size={16} className="text-danger" />
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white' }}>Bluffing & Authenticity Audit</h4>
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: '1fr 1fr', 
+            gap: '1rem',
+            filter: revealReviews ? 'none' : 'blur(4px)',
+            pointerEvents: revealReviews ? 'auto' : 'none',
+            transition: 'all 0.3s ease'
+          }}>
+            <div className="glass-card" style={{ padding: '1.25rem', borderLeft: '4px solid var(--secondary)', background: 'rgba(6, 182, 212, 0.02)', margin: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <Award size={16} className="text-secondary" />
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white' }}>Behavior & Confidence Review</h4>
+              </div>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
+                {report.behavioralAssessment || 'No feedback logged.'}
+              </p>
             </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
-              {report.bluffingAudit || 'Direct and honest answers.'}
-            </p>
+
+            <div className="glass-card" style={{ padding: '1.25rem', borderLeft: '4px solid var(--danger)', background: 'rgba(239, 68, 68, 0.02)', margin: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <AlertTriangle size={16} className="text-danger" />
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'white' }}>Bluffing & Authenticity Audit</h4>
+              </div>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
+                {report.bluffingAudit || 'Direct and honest answers.'}
+              </p>
+            </div>
           </div>
+
+          {!revealReviews && (
+            <div style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              right: 0, 
+              bottom: 0, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.4)',
+              zIndex: 10
+            }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => setRevealReviews(true)}
+                style={{ padding: '0.6rem 1.2rem', borderRadius: '8px' }}
+              >
+                Reveal Performance Reviews
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Strengths & Weaknesses Card Grid */}
@@ -299,6 +434,9 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {report.questions.map((q, idx) => {
               const isExpanded = expandedQuestion === idx;
+              const qText = typeof q.question === 'string' ? q.question : q.question?.text || '';
+              const qCategory = typeof q.question === 'object' ? q.question?.category || 'General' : 'General';
+
               return (
                 <div key={idx} className="glass-card" style={{ overflow: 'hidden', padding: 0 }}>
                   {/* Accordion Header */}
@@ -332,14 +470,16 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
                         {idx + 1}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>{q.question.category}</span>
-                        <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '2px 0 0 0' }}>{q.question.text}</p>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>{qCategory}</span>
+                        <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '2px 0 0 0' }}>{qText}</p>
                       </div>
                     </div>
                     
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginLeft: '1rem' }}>
-                      <span style={{ fontSize: '1rem', fontWeight: 700, color: getScoreColor(q.score) }}>{q.score}%</span>
-                      {isExpanded ? <ChevronUp size={18} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={18} style={{ color: 'var(--text-muted)' }} />}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginLeft: '1rem' }} onClick={(e) => e.stopPropagation()}>
+                      <span style={{ fontSize: '1rem', fontWeight: 700, color: getScoreColor(q.score ?? 0) }}>{q.score ?? 0}%</span>
+                      <div onClick={() => toggleExpand(idx)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        {isExpanded ? <ChevronUp size={18} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={18} style={{ color: 'var(--text-muted)' }} />}
+                      </div>
                     </div>
                   </div>
 
@@ -368,7 +508,7 @@ ${(report.actionableSteps || []).map(t => `- [ ] ${t}`).join('\n')}
                             <CheckCircle2 size={14} className="text-secondary" /> Suggested Reference Answer:
                           </h4>
                           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0, whiteSpace: 'pre-line' }}>
-                            {q.question.suggestedAnswer}
+                            {q.question?.suggestedAnswer}
                           </p>
                         </div>
                       )}

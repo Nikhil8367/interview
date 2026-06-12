@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Mic, MicOff, PhoneOff, Play, AlertCircle,
   CheckCircle2, Circle, Sparkles, Radio,
-  Volume2, Info, RefreshCw, ChevronRight
+  Volume2, Info, RefreshCw, ChevronRight, Plus
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, collection, query, where, getDocs, writeBatch, setDoc } from 'firebase/firestore';
 
 
 /* ─── Live API models ────────────────────────────────────────────── */
@@ -24,7 +24,20 @@ const LIVE_MODELS = [
     label: 'Gemini 2.5 Flash Native Audio',
     badge: 'AUDIO',
     desc: 'Native audio-to-audio · deeper acoustic nuance'
-  },
+  }
+];
+
+const TOPICS = [
+  { id: 'DSA', name: 'DSA', desc: 'Data Structures & Algorithms' },
+  { id: 'OOP', name: 'OOP', desc: 'Object-Oriented Programming' },
+  { id: 'DBMS', name: 'DBMS', desc: 'Database Systems' },
+  { id: 'OS', name: 'OS', desc: 'Operating Systems' },
+  { id: 'CN', name: 'CN', desc: 'Computer Networks' },
+  { id: 'Java', name: 'Java', desc: 'Java Development' },
+  { id: 'Python', name: 'Python', desc: 'Python Development' },
+  { id: 'HR', name: 'HR', desc: 'Behavioral & HR' },
+  { id: 'System Design', name: 'System Design', desc: 'System Architecture' },
+  { id: 'Web Development', name: 'Web Dev', desc: 'Frontend & Backend' }
 ];
 
 /* ─── helpers ────────────────────────────────────────────────────── */
@@ -121,7 +134,7 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
   const [err, setErr] = useState('');
   const [liveModel, setLiveModel] = useState(LIVE_MODELS[0].id);
   const [dialogue, setDialogue] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedTopics, setSelectedTopics] = useState(['DSA', 'OOP']);
   const [micLevel, setMicLevel] = useState(0);
   const [aiLevel, setAiLevel] = useState(0);
   const [muted, setMuted] = useState(false);
@@ -129,6 +142,87 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
   const [sessionReport, setSessionReport] = useState(null); // scoring result
   const [isScoring, setIsScoring] = useState(false);
   const [scoringError, setScoringError] = useState('');
+
+  // Add custom question states
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newQText, setNewQText] = useState('');
+  const [newQTopic, setNewQTopic] = useState('');
+  const [newQAnswer, setNewQAnswer] = useState('');
+
+  // Dynamic topic computation merging default topics and database categories
+  const allTopics = useMemo(() => {
+    const list = [...TOPICS];
+    const dbCategories = Array.from(new Set(questions.map(q => q.category).filter(Boolean)));
+    dbCategories.forEach(cat => {
+      const trimmed = cat.trim();
+      if (!trimmed) return;
+      const exists = list.some(t => t.id.toLowerCase() === trimmed.toLowerCase() || t.name.toLowerCase() === trimmed.toLowerCase());
+      if (!exists) {
+        list.push({
+          id: trimmed,
+          name: trimmed,
+          desc: 'Custom category from database'
+        });
+      }
+    });
+    return list;
+  }, [questions]);
+
+  // Question count per topic
+  const getQuestionCountForTopic = useCallback((topic) => {
+    return questions.filter(q => {
+      if (!q.category) return false;
+      const cat = q.category.trim().toLowerCase();
+      return cat === topic.id.toLowerCase() || cat === topic.name.toLowerCase();
+    }).length;
+  }, [questions]);
+
+  const handleAddCustomQuestion = useCallback(async (e) => {
+    e.preventDefault();
+    if (!newQText.trim() || !newQTopic.trim()) return;
+
+    const topicName = newQTopic.trim();
+    const newQId = `q_custom_${Date.now()}_${user?.id || 'anon'}`;
+    const newQ = {
+      id: newQId,
+      userId: user?.id || 'anonymous',
+      text: newQText.trim(),
+      category: topicName,
+      suggestedAnswer: newQAnswer.trim(),
+      keywords: []
+    };
+
+    try {
+      if (db && user?.id) {
+        const qRef = doc(db, 'questions', newQId);
+        await setDoc(qRef, newQ);
+      }
+      
+      if (setQuestions) {
+        setQuestions(prev => [...prev, newQ]);
+      }
+
+      // Check if this topic ID already exists or is new
+      const match = allTopics.find(t => t.id.toLowerCase() === topicName.toLowerCase() || t.name.toLowerCase() === topicName.toLowerCase());
+      const targetTopicId = match ? match.id : topicName;
+
+      // Automatically select the new or existing topic for this question
+      setSelectedTopics(prev => {
+        if (!prev.includes(targetTopicId)) {
+          return [...prev, targetTopicId];
+        }
+        return prev;
+      });
+
+      setNewQText('');
+      setNewQTopic('');
+      setNewQAnswer('');
+      setShowAddForm(false);
+    } catch (err) {
+      console.error("Error adding question:", err);
+      setErr("Failed to save the question. Please try again.");
+    }
+  }, [newQText, newQTopic, newQAnswer, user, allTopics, setQuestions]);
 
   // Audio input/output devices selection state
   const [inputDevices, setInputDevices] = useState([]);
@@ -149,12 +243,6 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
 
   // keep mutedRef in sync
   useEffect(() => { mutedRef.current = muted; }, [muted]);
-
-  // select all by default
-  useEffect(() => {
-    if (questions.length && !selectedIds.length)
-      setSelectedIds(questions.map(q => q.id));
-  }, [questions]);
 
   // synchronize global geminiModel prop with local liveModel state
   useEffect(() => {
@@ -271,7 +359,8 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
       .map(d => `${d.sender === 'ai' ? 'Interviewer' : 'Candidate'}: ${d.text}`)
       .join('\n');
 
-    const prompt = `You are an expert interview coach. Analyse this mock interview transcript and respond with ONLY valid JSON matching exactly this schema:
+    const prompt = `You are an expert interview coach. The candidate selected the following topics for assessment: ${selectedTopics.join(', ')}.
+Analyse this mock interview transcript and respond with ONLY valid JSON matching exactly this schema:
 {
   "overall": <integer 0-100>,
   "grade": <"A"|"B"|"C"|"D"|"F">,
@@ -620,7 +709,7 @@ ${transcript}`;
     } finally {
       setIsScoring(false);
     }
-  }, [apiKey, sessionStartTime, onSaveReport, questions, setQuestions, geminiModel]);
+  }, [apiKey, sessionStartTime, onSaveReport, questions, setQuestions, geminiModel, selectedTopics]);
 
   /* ── teardown ─────────────────────────────────────────────────── */
   const teardown = useCallback(() => {
@@ -721,13 +810,7 @@ ${transcript}`;
   /* ── connect ─────────────────────────────────────────────────── */
   const connect = useCallback(async () => {
     if (!apiKey) { setErr('Add your Gemini API key in Settings (⚙) first.'); return; }
-    const shuffled = questions
-      .filter(q => selectedIds.includes(q.id))
-      .sort(() => Math.random() - 0.5);
-    const syllabus = shuffled
-      .map((q, i) => `${i + 1}. ${q.text}`)
-      .join('\n');
-    if (!syllabus) { setErr('Select at least one question to include in the interview.'); return; }
+    if (!selectedTopics.length) { setErr('Select at least one topic to include in the interview.'); return; }
 
     setErr(''); setCloseInfo(''); setSessionReport(null); setScoringError('');
     setStatus('connecting');
@@ -752,6 +835,17 @@ ${transcript}`;
       }
       playAcRef.current = outAc;
 
+      // Gather relevant questions from the database for the selected topics
+      const relevantQuestions = questions.filter(q => {
+        if (!q.category) return false;
+        const cat = q.category.trim().toLowerCase();
+        return selectedTopics.some(topicId => topicId.toLowerCase() === cat);
+      });
+
+      const questionsListText = relevantQuestions.length > 0
+        ? relevantQuestions.map((q) => `- [Topic: ${q.category}] ${q.text}`).join('\n')
+        : 'No pre-existing questions available in this category.';
+
       // WebSocket
       const modelName = `models/${liveModel}`;
       const ws = new WebSocket(`${LIVE_WS_URL}?key=${apiKey}`);
@@ -775,16 +869,21 @@ ${transcript}`;
               parts: [{
                 text: `You are a warm, professional mock interviewer running a live voice interview.
 
-The following questions have been randomly shuffled for this session:
-${syllabus}
+The candidate has selected the following topic(s) for this interview:
+${selectedTopics.join(', ')}
+
+Here are the pre-existing questions from the database for these selected topics:
+${questionsListText}
 
 Rules:
-- Ask questions in the order listed above (they are already randomized each session).
-- Speak naturally and concisely. Do not read the full list upfront.
-- Begin by warmly greeting the candidate and asking question 1.
+- You must prioritize asking the pre-existing questions from the list provided above first.
+- Sometime, you may go "out of the box" and dynamically generate new, custom questions targeting the selected topics to challenge the candidate or when you have exhausted the pre-existing list.
+- Scale the difficulty of the questions based on the candidate's performance (starting with Medium, scaling up to Hard for excellent answers, or down to Easy if they struggle).
+- Speak naturally and concisely. Ask only one question at a time.
+- Begin by warmly greeting the candidate and asking the first question from the chosen topics (using the pre-existing questions if possible).
 - Dynamic Follow-ups: When the candidate answers, evaluate the depth of their response.
-  - Sometime (not every time, but only when their answer feels superficial, incomplete, or misses a core concept), instead of moving to the next syllabus question immediately, ask a relevant follow-up or clarifying question to probe deeper. Guide them until they provide a satisfactory answer or complete response.
-  - Otherwise (and after concluding any follow-ups for the current topic), provide a brief 1-sentence feedback, and transition smoothly to the next question in the syllabus list.`
+  - Sometime (not every time, but only when their answer feels superficial, incomplete, or misses a core concept), ask a relevant follow-up or clarifying question to probe deeper. Guide them until they provide a satisfactory answer or complete response.
+  - Otherwise (and after concluding any follow-ups for the current topic), provide a brief 1-sentence feedback, and transition smoothly to the next question targeting the selected topics.`
               }]
             }
           }
@@ -847,12 +946,12 @@ Rules:
       setStatus('error');
       teardown();
     }
-  }, [apiKey, questions, selectedIds, liveModel, selectedInputDeviceId, selectedOutputDeviceId, handleMessage, teardown, loadAudioDevices, scoreSession]);
+  }, [apiKey, liveModel, selectedInputDeviceId, selectedOutputDeviceId, handleMessage, teardown, loadAudioDevices, scoreSession, selectedTopics, questions]);
 
-  /* ── question selection helpers ──────────────────────────────── */
-  const toggle = (id) => setSelectedIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
-  const selectAll = () => setSelectedIds(questions.map(q => q.id));
-  const selectNone = () => setSelectedIds([]);
+  /* ── topic selection helpers ────────────────────────────────── */
+  const toggleTopic = (id) => setSelectedTopics(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const selectAllTopics = () => setSelectedTopics(allTopics.map(t => t.id));
+  const selectNoTopics = () => setSelectedTopics([]);
 
   /* ── derived ─────────────────────────────────────────────────── */
   const isLive = status === 'live';
@@ -942,39 +1041,105 @@ Rules:
       {/* ── MAIN BODY ───────────────────────────────────────────── */}
       <div className="rtm-body">
 
-        {/* LEFT: Syllabus panel */}
+        {/* LEFT: Topic selection panel */}
         <div className="rtm-syllabus">
           <div className="rtm-syllabus-header">
-            <span className="rtm-section-label">Interview Syllabus</span>
-            <span className="rtm-counter">{selectedIds.length}/{questions.length}</span>
+            <span className="rtm-section-label">Interview Topics</span>
+            <span className="rtm-counter">{selectedTopics.length}/{allTopics.length}</span>
           </div>
           <div className="rtm-syllabus-actions">
-            <button className="rtm-sm-btn" onClick={selectAll}>All</button>
-            <button className="rtm-sm-btn" onClick={selectNone}>None</button>
+            <button className="rtm-sm-btn" onClick={selectAllTopics} disabled={!canConnect}>All</button>
+            <button className="rtm-sm-btn" onClick={selectNoTopics} disabled={!canConnect}>None</button>
           </div>
-          <div className="rtm-question-list">
-            {questions.length === 0 && (
-              <p className="rtm-empty-hint">No questions yet — add some in Practice Arena.</p>
-            )}
-            {questions.map(q => {
-              const sel = selectedIds.includes(q.id);
+          <div className="rtm-question-list" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '380px' }}>
+            {allTopics.map(topic => {
+              const sel = selectedTopics.includes(topic.id);
+              const qCount = getQuestionCountForTopic(topic);
               return (
                 <div
-                  key={q.id}
+                  key={topic.id}
                   className={`rtm-q-item ${sel ? 'selected' : ''} ${!canConnect ? 'locked' : ''}`}
-                  onClick={() => canConnect && toggle(q.id)}
+                  onClick={() => canConnect && toggleTopic(topic.id)}
                 >
                   {sel
                     ? <CheckCircle2 size={14} className="rtm-q-check active" />
                     : <Circle size={14} className="rtm-q-check" />}
-                  <div>
-                    <p className="rtm-q-text">{q.text}</p>
-                    {q.category && <span className="rtm-q-cat">{q.category}</span>}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '0.5rem' }}>
+                      <p className="rtm-q-text" style={{ fontWeight: 600, margin: 0 }}>{topic.name}</p>
+                      <span style={{ fontSize: '0.65rem', padding: '1px 5px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {qCount} Q{qCount !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <span className="rtm-q-cat">{topic.desc}</span>
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* Add custom question button & form */}
+          {canConnect && (
+            <div className="rtm-add-question-section" style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.75rem', marginTop: 'auto' }}>
+              {!showAddForm ? (
+                <button
+                  className="rtm-sm-btn"
+                  onClick={() => setShowAddForm(true)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', width: '100%', padding: '0.45rem 0' }}
+                >
+                  <Plus size={14} /> Add Question
+                </button>
+              ) : (
+                <form onSubmit={handleAddCustomQuestion} style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                  <span className="rtm-section-label" style={{ fontSize: '0.65rem', marginBottom: '2px' }}>New Question</span>
+                  
+                  <textarea
+                    className="rtm-input"
+                    value={newQText}
+                    onChange={(e) => setNewQText(e.target.value)}
+                    placeholder="Enter question text..."
+                    rows={2}
+                    style={{ width: '100%', fontSize: '0.75rem', padding: '0.4rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', borderRadius: '4px', resize: 'vertical', color: 'white' }}
+                    required
+                  />
+
+                  <input
+                    type="text"
+                    list="existing-topics"
+                    className="rtm-input"
+                    value={newQTopic}
+                    onChange={(e) => setNewQTopic(e.target.value)}
+                    placeholder="Topic (e.g. DSA, React)"
+                    style={{ width: '100%', fontSize: '0.75rem', padding: '0.4rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', borderRadius: '4px', color: 'white' }}
+                    required
+                  />
+                  <datalist id="existing-topics">
+                    {allTopics.map(t => (
+                      <option key={t.id} value={t.name} />
+                    ))}
+                  </datalist>
+
+                  <textarea
+                    className="rtm-input"
+                    value={newQAnswer}
+                    onChange={(e) => setNewQAnswer(e.target.value)}
+                    placeholder="Suggested answer (optional)"
+                    rows={2}
+                    style={{ width: '100%', fontSize: '0.75rem', padding: '0.4rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', borderRadius: '4px', resize: 'vertical', color: 'white' }}
+                  />
+
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button type="submit" className="rtm-sm-btn" style={{ flex: 1, background: 'rgba(6,182,212,0.2)', color: 'white', borderColor: 'rgba(6,182,212,0.4)' }}>
+                      Save
+                    </button>
+                    <button type="button" className="rtm-sm-btn" style={{ flex: 1 }} onClick={() => setShowAddForm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RIGHT: Arena */}

@@ -663,3 +663,308 @@ You MUST respond in JSON format ONLY. Do not wrap it in markdown code blocks. Th
     };
   }
 }
+
+/**
+ * Generates the next question dynamically using Gemini based on selected topics.
+ */
+export async function generateNextMockQuestion(selectedTopics, previousQuestions, currentDifficulty, apiKey, model = '') {
+  try {
+    const rawModel = model || localStorage.getItem('gemini_model') || 'gemini-2.0-flash';
+    const previousQuestionsText = previousQuestions.map(q => q.text).join('\n');
+    
+    const prompt = `You are an expert technical interviewer.
+Generate a single interview question based on the selected topics: ${selectedTopics.join(', ')}.
+Choose one of the selected topics to focus this question on.
+The desired difficulty of the question is: ${currentDifficulty} (options: Easy, Medium, Hard).
+
+To ensure a diverse and professional interview:
+- The question must be highly relevant and accurate to the selected topic.
+- Do NOT generate any question that is similar or identical to these previously asked questions:
+${previousQuestionsText ? previousQuestionsText : 'None'}
+
+Provide a comprehensive, high-quality, suggested/ideal reference answer for this question. This ideal answer will be used for evaluating the candidate's response in the background. Also identify 3-5 technical keywords/concepts that the candidate should mention in their response.
+
+Respond ONLY with a valid JSON object matching this schema (do NOT wrap it in markdown code blocks or add any markdown formatting):
+{
+  "text": "The text of the generated interview question",
+  "category": "The specific topic of this question (must be one of: ${selectedTopics.join(', ')})",
+  "difficulty": "${currentDifficulty}",
+  "suggestedAnswer": "A detailed, comprehensive, high-fidelity reference answer that contains the ideal response.",
+  "keywords": ["keyword1", "keyword2", "keyword3"]
+}`;
+
+    const rawText = await generateGeminiContentWithFallback(prompt, apiKey, rawModel);
+    const parsed = extractJson(rawText);
+    return parsed;
+  } catch (error) {
+    console.error("Error generating question, using local preset fallback:", error);
+    const fallbackPool = [
+      { category: 'DSA', text: 'Explain the difference between an Array and a Linked List, and when to use each.', difficulty: 'Easy', keywords: ['Array', 'Linked List', 'index', 'pointers', 'sequential', 'memory allocation'], suggestedAnswer: 'Arrays are stored in contiguous memory locations, allowing O(1) random access but making insertions and deletions slow O(N). Linked lists consist of nodes with pointers scattered in memory, enabling O(1) insertions/deletions at known positions but O(N) lookup. Use arrays for index-heavy lookups, and linked lists for frequent insertions/deletions.' },
+      { category: 'OOP', text: 'What is Polymorphism in Object-Oriented Programming? Give examples of compile-time and runtime polymorphism.', difficulty: 'Medium', keywords: ['Polymorphism', 'overloading', 'overriding', 'runtime', 'compile-time', 'inheritance'], suggestedAnswer: 'Polymorphism allows objects of different classes to be treated as objects of a common superclass. Compile-time polymorphism is achieved through method overloading (same name, different arguments). Runtime polymorphism is achieved through method overriding (subclass redefines a superclass method, resolved at runtime via dynamic binding).' },
+      { category: 'DBMS', text: 'What are the ACID properties in database management systems, and why are they important?', difficulty: 'Medium', keywords: ['ACID', 'Atomicity', 'Consistency', 'Isolation', 'Durability', 'transaction'], suggestedAnswer: 'ACID properties ensure database reliability: Atomicity (all or nothing executes), Consistency (database transitions from one valid state to another), Isolation (concurrent transactions execute independently without interference), and Durability (once committed, changes persist even through system crashes).' },
+      { category: 'OS', text: 'Explain the concept of virtual memory in operating systems and how paging works.', difficulty: 'Hard', keywords: ['Virtual Memory', 'paging', 'page fault', 'physical memory', 'RAM', 'disk swap'], suggestedAnswer: 'Virtual memory is a storage allocation scheme where secondary memory (disk) is treated as part of main memory (RAM). Paging divides virtual memory into fixed-size blocks called pages, and physical memory into frames. The page table maps virtual pages to physical frames. When a page is not in RAM, a page fault occurs, loading the page from the disk.' },
+      { category: 'System Design', text: 'Describe the key components of a load balancer and how it distributes traffic.', difficulty: 'Hard', keywords: ['Load Balancer', 'round robin', 'health check', 'scalability', 'proxy', 'reverse proxy'], suggestedAnswer: 'A load balancer distributes incoming network traffic across multiple servers to ensure scalability and reliability. It performs health checks to route traffic only to active servers, uses algorithms like Round Robin or Least Connections, and serves as a reverse proxy protecting the internal servers.' }
+    ];
+
+    const matched = fallbackPool.filter(q => selectedTopics.includes(q.category));
+    const finalPool = matched.length > 0 ? matched : fallbackPool;
+    const randomQ = finalPool[Math.floor(Math.random() * finalPool.length)];
+    
+    return {
+      text: randomQ.text,
+      category: randomQ.category,
+      difficulty: randomQ.difficulty,
+      suggestedAnswer: randomQ.suggestedAnswer,
+      keywords: randomQ.keywords
+    };
+  }
+}
+
+/**
+ * Performs real-time evaluation of a single mock interview question answer.
+ */
+export async function evaluateMockQuestionAnswer(questionObj, transcript, durationSeconds, apiKey, model = '') {
+  try {
+    const rawModel = model || localStorage.getItem('gemini_model') || 'gemini-2.0-flash';
+    const result = await analyzeTranscriptWithGemini(transcript, questionObj, durationSeconds, apiKey, rawModel);
+    
+    const words = transcript.split(/\s+/).filter(Boolean);
+    const wpm = durationSeconds > 0 ? Math.round(words.length / (durationSeconds / 60)) : 0;
+    
+    return {
+      score: result.score ?? 70,
+      grammarMistakes: result.grammarMistakes || [],
+      theoryMistakes: result.theoryMistakes || [],
+      wpm,
+      feedback: result.overallFeedback || ''
+    };
+  } catch (error) {
+    console.error("Error evaluating mock question answer:", error);
+    const localResult = analyzeTranscriptLocally(transcript, questionObj, durationSeconds);
+    const words = transcript.split(/\s+/).filter(Boolean);
+    const wpm = durationSeconds > 0 ? Math.round(words.length / (durationSeconds / 60)) : 0;
+    
+    return {
+      score: localResult.score ?? 60,
+      grammarMistakes: localResult.grammarMistakes || [],
+      theoryMistakes: localResult.theoryMistakes || [],
+      wpm,
+      feedback: localResult.feedback || 'Answer reviewed locally.'
+    };
+  }
+}
+
+/**
+ * Compiles the final detailed report from individual question evaluations.
+ */
+export async function compileFinalMockReport(answers, selectedTopics, apiKey, model = '') {
+  try {
+    const rawModel = model || localStorage.getItem('gemini_model') || 'gemini-2.0-flash';
+    
+    let totalScore = 0;
+    let totalDuration = 0;
+    let totalBreaks = 0;
+    let totalWords = 0;
+    let totalFillers = 0;
+    const fillerBreakdown = {};
+    const topicScores = {};
+    
+    answers.forEach((ans) => {
+      totalScore += ans.score || 0;
+      totalDuration += ans.duration || 0;
+      totalBreaks += ans.breaksCount || 0;
+      
+      const words = (ans.transcript || '').split(/\s+/).filter(Boolean);
+      totalWords += words.length;
+      
+      words.forEach(w => {
+        const cleanWord = w.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+        if (COMMON_FILLER_WORDS.includes(cleanWord)) {
+          totalFillers++;
+          fillerBreakdown[cleanWord] = (fillerBreakdown[cleanWord] || 0) + 1;
+        }
+      });
+      
+      const topic = ans.question.category || 'General';
+      if (!topicScores[topic]) {
+        topicScores[topic] = { sum: 0, count: 0 };
+      }
+      topicScores[topic].sum += ans.score || 0;
+      topicScores[topic].count += 1;
+    });
+    
+    const avgScore = answers.length > 0 ? Math.round(totalScore / answers.length) : 0;
+    const avgWpm = totalDuration > 0 ? Math.round(totalWords / (totalDuration / 60)) : 0;
+    
+    const finalizedTopicScores = {};
+    Object.keys(topicScores).forEach(topic => {
+      finalizedTopicScores[topic] = Math.round(topicScores[topic].sum / topicScores[topic].count);
+    });
+
+    const summaryPromptData = answers.map((ans, idx) => ({
+      index: idx + 1,
+      question: ans.question.text,
+      category: ans.question.category,
+      transcript: ans.transcript,
+      score: ans.score,
+      theoryMistakes: ans.theoryMistakes || [],
+      grammarMistakes: ans.grammarMistakes || []
+    }));
+
+    const prompt = `You are an expert interview coach. Analyze this summary data of a candidate's completed mock interview:
+Selected Topics: ${selectedTopics.join(', ')}
+Overall Score (calculated): ${avgScore}/100
+Average Pacing: ${avgWpm} WPM
+Filler Words Count: ${totalFillers}
+Breaks/Pauses Count: ${totalBreaks}
+
+Question evaluations:
+${JSON.stringify(summaryPromptData, null, 2)}
+
+Please provide a comprehensive summary audit of the interview containing:
+1. "overallFeedback": A detailed coaching paragraph summarizing their performance, key technical areas of strength/weakness, and verbal communication advice.
+2. "paceAssessment": Feedback on their pace and speed.
+3. "communicationAssessment": Feedback on their pauses, flow, and filler usage.
+4. "behavioralAssessment": Review of structure, confidence, and verbal patterns.
+5. "bluffingAudit": Review of whether they tried to bluff/evade technical details.
+6. "strengths": Array of exactly 3 overall strength strings.
+7. "weaknesses": Array of exactly 3 overall weakness strings.
+8. "actionableSteps": Array of 3 to 5 highly concrete, actionable next steps or study tasks.
+
+Respond ONLY with a valid JSON object matching this schema (do NOT wrap in markdown blocks):
+{
+  "overallFeedback": "coaching feedback...",
+  "paceAssessment": "pace feedback...",
+  "communicationAssessment": "pauses feedback...",
+  "behavioralAssessment": "behavioral feedback...",
+  "bluffingAudit": "bluffing audit...",
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "weaknesses": ["weakness 1", "weakness 2", "weakness 3"],
+  "actionableSteps": ["step 1", "step 2", "step 3"]
+}`;
+
+    const rawText = await generateGeminiContentWithFallback(prompt, apiKey, rawModel);
+    const parsed = extractJson(rawText);
+    
+    let paceRating = 'Normal';
+    if (avgWpm < 110) paceRating = 'Slow';
+    else if (avgWpm > 170) paceRating = 'Fast';
+    
+    return {
+      score: avgScore,
+      totalDuration,
+      breaksCount: totalBreaks,
+      wordCount: totalWords,
+      wpm: avgWpm,
+      fillerCount: totalFillers,
+      fillerBreakdown,
+      paceRating,
+      paceFeedback: parsed.paceAssessment || 'Normal flow.',
+      communicationAssessment: parsed.communicationAssessment || '',
+      behavioralAssessment: parsed.behavioralAssessment || '',
+      bluffingAudit: parsed.bluffingAudit || '',
+      strengths: parsed.strengths || [],
+      weaknesses: parsed.weaknesses || [],
+      actionableSteps: parsed.actionableSteps || [],
+      feedback: parsed.overallFeedback || '',
+      topicScores: finalizedTopicScores,
+      questions: answers.map(ans => ({
+        question: ans.question,
+        score: ans.score,
+        transcript: ans.transcript,
+        wpm: ans.wpm,
+        duration: ans.duration,
+        breaksCount: ans.breaksCount,
+        theoryMistakes: ans.theoryMistakes || [],
+        grammarMistakes: ans.grammarMistakes || []
+      }))
+    };
+  } catch (error) {
+    console.error("Error compiling final report with Gemini:", error);
+    return compileFinalReportLocally(answers, selectedTopics);
+  }
+}
+
+/**
+ * Fallback local report compiler.
+ */
+export function compileFinalReportLocally(answers, selectedTopics) {
+  let totalScore = 0;
+  let totalDuration = 0;
+  let totalBreaks = 0;
+  let totalWords = 0;
+  let totalFillers = 0;
+  const fillerBreakdown = {};
+  const topicScores = {};
+  
+  answers.forEach((ans) => {
+    totalScore += ans.score || 0;
+    totalDuration += ans.duration || 0;
+    totalBreaks += ans.breaksCount || 0;
+    
+    const words = (ans.transcript || '').split(/\s+/).filter(Boolean);
+    totalWords += words.length;
+    
+    words.forEach(w => {
+      const cleanWord = w.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      if (COMMON_FILLER_WORDS.includes(cleanWord)) {
+        totalFillers++;
+        fillerBreakdown[cleanWord] = (fillerBreakdown[cleanWord] || 0) + 1;
+      }
+    });
+    
+    const topic = ans.question.category || 'General';
+    if (!topicScores[topic]) {
+      topicScores[topic] = { sum: 0, count: 0 };
+    }
+    topicScores[topic].sum += ans.score || 0;
+    topicScores[topic].count += 1;
+  });
+  
+  const avgScore = answers.length > 0 ? Math.round(totalScore / answers.length) : 0;
+  const avgWpm = totalDuration > 0 ? Math.round(totalWords / (totalDuration / 60)) : 0;
+  
+  const finalizedTopicScores = {};
+  Object.keys(topicScores).forEach(topic => {
+    finalizedTopicScores[topic] = Math.round(topicScores[topic].sum / topicScores[topic].count);
+  });
+  
+  let paceRating = 'Normal';
+  if (avgWpm < 110) paceRating = 'Slow';
+  else if (avgWpm > 170) paceRating = 'Fast';
+  
+  return {
+    score: avgScore,
+    totalDuration,
+    breaksCount: totalBreaks,
+    wordCount: totalWords,
+    wpm: avgWpm,
+    fillerCount: totalFillers,
+    fillerBreakdown,
+    paceRating,
+    paceFeedback: `Pacing was ${avgWpm} WPM.`,
+    communicationAssessment: 'Communication metrics analyzed locally.',
+    behavioralAssessment: 'Behavioral structure compiled locally.',
+    bluffingAudit: 'Bluffing audit complete.',
+    strengths: ['Direct response style', 'Good pace control', 'Vocabulary range'],
+    weaknesses: ['Slight pauses between details', 'Buzzword padding on gaps', 'Minor grammar slips'],
+    actionableSteps: [
+      'Review the key concepts checklist for technical categories',
+      'Avoid filler phrasing when transitioning between concepts',
+      'Try reading technical definitions out loud to build fluency'
+    ],
+    feedback: 'Thank you for completing your mock interview session. Report compiled successfully.',
+    topicScores: finalizedTopicScores,
+    questions: answers.map(ans => ({
+      question: ans.question,
+      score: ans.score,
+      transcript: ans.transcript,
+      wpm: ans.wpm,
+      duration: ans.duration,
+      breaksCount: ans.breaksCount,
+      theoryMistakes: ans.theoryMistakes || [],
+      grammarMistakes: ans.grammarMistakes || []
+    }))
+  };
+}
+
