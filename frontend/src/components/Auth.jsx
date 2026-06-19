@@ -3,6 +3,8 @@ import { Sparkles, Key, Award, Clock, ArrowRight } from 'lucide-react';
 import { auth, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { PRESETS } from './QuestionManager';
+import LoadingOverlay from './LoadingOverlay';
+import useDelayedLoading from '../hooks/useDelayedLoading';
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,6 +12,7 @@ export default function Auth({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const delayedLoading = useDelayedLoading(loading, 3000);
 
   const handleGoogleSignIn = async () => {
     setError('');
@@ -27,6 +30,7 @@ export default function Auth({ onLogin }) {
         userData = {
           id: firebaseUser.uid,
           username: usernameVal,
+          usernameNormalized: usernameVal.trim().toLowerCase(),
           email: firebaseUser.email,
           createdAt: new Date().toISOString()
         };
@@ -218,7 +222,12 @@ export default function Auth({ onLogin }) {
         </div>
 
         {/* Right Side: Simple form */}
-        <div className="auth-right-panel" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="auth-right-panel" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative' }}>
+          <LoadingOverlay 
+            loading={delayedLoading} 
+            message={isLogin ? 'Authenticating...' : 'Registering Account...'} 
+            subMessage="Please wait while we establish your secure workspace session" 
+          />
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', marginBottom: '0.5rem' }}>
             {isLogin ? 'Welcome Back' : 'Create Account'}
           </h2>

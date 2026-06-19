@@ -5,15 +5,42 @@ service cloud.firestore {
     
     // User Profile Rules
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     // Scoped Questions Rules
     match /questions/{questionId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)) &&
+         get(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)).data.status == 'accepted')
+      );
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && (
+        (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)) &&
+         get(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)).data.status == 'accepted')
+      );
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // Question Shares Rules
+    match /shares/{shareId} {
+      allow read: if request.auth != null && (
+        resource.data.senderId == request.auth.uid || 
+        resource.data.receiverId == request.auth.uid
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.senderId == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.receiverId == request.auth.uid || 
+        resource.data.senderId == request.auth.uid
+      );
+      allow delete: if request.auth != null && (
+        resource.data.senderId == request.auth.uid || 
+        resource.data.receiverId == request.auth.uid
+      );
     }
 
     // Scoped Reports Rules

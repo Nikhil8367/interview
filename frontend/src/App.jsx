@@ -7,10 +7,12 @@ import MockInterviewReport from './components/MockInterviewReport';
 import Auth from './components/Auth';
 import HistoryView from './components/HistoryView';
 import RealtimeMock from './components/RealtimeMock';
+import LoadingOverlay from './components/LoadingOverlay';
+import useDelayedLoading from './hooks/useDelayedLoading';
 import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic, Menu } from 'lucide-react';
 import { API_BASE } from './config';
 import { db } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc, writeBatch, onSnapshot } from 'firebase/firestore';
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -92,43 +94,122 @@ function App() {
   // Settings Drawer Toggle State
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Fetch scoped questions for user
+  const loadQuestions = async () => {
+    // No-op because the real-time listener handles state updates automatically.
+  };
+
+  // Fetch scoped questions for user in real-time
   useEffect(() => {
     if (!user) return;
-    const fetchQuestions = async () => {
-      try {
-        const q = query(collection(db, 'questions'), where('userId', '==', user.id));
-        const snapshot = await getDocs(q);
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        if (data.length === 0) {
-          console.log("No questions found in Firestore for user, auto-seeding PRESETS...");
-          const batch = writeBatch(db);
-          PRESETS.forEach(p => {
-            const qId = `q_${p.id}_${user.id}`;
-            const qRef = doc(db, 'questions', qId);
-            batch.set(qRef, {
-              ...p,
-              id: qId,
-              userId: user.id
-            });
-          });
-          await batch.commit();
-          
-          const freshSnapshot = await getDocs(q);
-          data = freshSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        }
 
-        setQuestions(data);
-        // Set first question active by default if none selected
-        if (data.length > 0 && !activeQuestion) {
-          setActiveQuestion(data[0]);
+    let unsubQuestions = () => {};
+    let unsubShares = () => {};
+    const activeListeners = new Map(); // questionId -> unsubscribe function
+
+    // Keep track of the latest data to prevent stale/incorrect states during asynchronous updates
+    let latestOwned = [];
+    let latestShares = [];
+    const latestSharedQuestionsMap = {};
+
+    let rebuildTimeout = null;
+    const rebuildAndSet = () => {
+      if (rebuildTimeout) return;
+      rebuildTimeout = setTimeout(() => {
+        rebuildTimeout = null;
+
+        const sharedDocs = [];
+        latestShares.forEach(shareData => {
+          const qData = latestSharedQuestionsMap[shareData.questionId];
+          if (qData) {
+            sharedDocs.push({
+              id: shareData.questionId,
+              ...qData,
+              isShared: true,
+              sharedBy: shareData.senderUsername || 'Another User',
+              shareId: shareData.id
+            });
+          }
+        });
+
+        const combinedQuestions = [...latestOwned, ...sharedDocs];
+        setQuestions(combinedQuestions);
+
+        if (combinedQuestions.length > 0) {
+          setActiveQuestion(prev => {
+            if (!prev || !combinedQuestions.some(cq => cq.id === prev.id)) {
+              return combinedQuestions[0];
+            }
+            return combinedQuestions.find(cq => cq.id === prev.id) || combinedQuestions[0];
+          });
+        } else {
+          setActiveQuestion(null);
         }
-      } catch (err) {
-        console.error("Error fetching questions:", err);
+      }, 0);
+    };
+
+    // Listen to owned questions
+    const qQuestions = query(collection(db, 'questions'), where('userId', '==', user.id));
+    unsubQuestions = onSnapshot(qQuestions, (snapshot) => {
+      latestOwned = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      rebuildAndSet();
+    }, (err) => {
+      console.error("Error listening to questions:", err);
+    });
+
+    // Listen to accepted shares
+    const qShares = query(
+      collection(db, 'shares'), 
+      where('receiverId', '==', user.id), 
+      where('status', '==', 'accepted')
+    );
+    unsubShares = onSnapshot(qShares, (snapshot) => {
+      latestShares = snapshot.docs.map(doc => doc.data());
+      
+      const newQuestionIds = new Set(latestShares.map(s => s.questionId));
+
+      // 1. Unsubscribe from questions that are no longer shared
+      for (const [qId, unsub] of activeListeners.entries()) {
+        if (!newQuestionIds.has(qId)) {
+          unsub();
+          activeListeners.delete(qId);
+          delete latestSharedQuestionsMap[qId];
+        }
+      }
+
+      // 2. Subscribe to new shared questions
+      latestShares.forEach(shareData => {
+        const qId = shareData.questionId;
+        if (!activeListeners.has(qId)) {
+          const qRef = doc(db, 'questions', qId);
+          const unsubQ = onSnapshot(qRef, (snap) => {
+            if (snap.exists()) {
+              latestSharedQuestionsMap[qId] = snap.data();
+            } else {
+              delete latestSharedQuestionsMap[qId];
+            }
+            rebuildAndSet();
+          }, (err) => {
+            console.error(`Error listening to shared question ${qId}:`, err);
+          });
+          activeListeners.set(qId, unsubQ);
+        }
+      });
+
+      rebuildAndSet();
+    }, (err) => {
+      console.error("Error listening to accepted shares:", err);
+    });
+
+    return () => {
+      unsubQuestions();
+      unsubShares();
+      for (const unsub of activeListeners.values()) {
+        unsub();
+      }
+      if (rebuildTimeout) {
+        clearTimeout(rebuildTimeout);
       }
     };
-    fetchQuestions();
   }, [user]);
 
   // Mock Interview States
@@ -140,6 +221,7 @@ function App() {
   const [mockReport, setMockReport] = useState(null);
   const [mockTimeRemaining, setMockTimeRemaining] = useState(0);
   const [loadingQuestion, setLoadingQuestion] = useState(false);
+  const isMockEvaluating = useDelayedLoading(mockStatus === 'analyzing', 3000);
 
   // Refs for tracking real-time answer progress to submit on timeout
   const currentAnswerRef = useRef({ transcript: '', elapsedTime: 0, breaksCount: 0 });
@@ -1061,6 +1143,7 @@ function App() {
                 questions={questions}
                 setQuestions={setQuestions}
                 user={user}
+                onReloadQuestions={loadQuestions}
               />
             )}
           </section>
@@ -1132,16 +1215,16 @@ function App() {
                   loadingQuestion={loadingQuestion}
                 />
               )}
-              {mockStatus === 'analyzing' && (
-                <div className="empty-state" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center', alignItems: 'center' }}>
-                  <RefreshCw size={48} className="text-primary animate-spin" />
-                  <h2 style={{ fontSize: '1.25rem' }}>Evaluating Interview...</h2>
-                  <p style={{ maxWidth: '400px', fontSize: '0.9rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                    Generating overall assessment, detailed grammar audits, and conceptual technical review. This may take a moment.
-                  </p>
+              {(mockStatus === 'analyzing' || isMockEvaluating) && (
+                <div className="empty-state" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center', alignItems: 'center', position: 'relative', minHeight: '350px' }}>
+                  <LoadingOverlay 
+                    loading={true} 
+                    message="Evaluating Interview..." 
+                    subMessage="Generating overall assessment, detailed grammar audits, and conceptual technical review. This may take a moment."
+                  />
                 </div>
               )}
-              {mockStatus === 'report' && (
+              {mockStatus === 'report' && !isMockEvaluating && (
                 <MockInterviewReport 
                   report={mockReport} 
                   onReset={handleCancelMock} 

@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, collection, query, where, getDocs, writeBatch, setDoc } from 'firebase/firestore';
+import LoadingOverlay from './LoadingOverlay';
+import useDelayedLoading from '../hooks/useDelayedLoading';
 
 
 /* ─── Live API models ────────────────────────────────────────────── */
@@ -141,6 +143,7 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
   const [closeInfo, setCloseInfo] = useState('');
   const [sessionReport, setSessionReport] = useState(null); // scoring result
   const [isScoring, setIsScoring] = useState(false);
+  const isScoringDelayed = useDelayedLoading(isScoring, 3000);
   const [scoringError, setScoringError] = useState('');
 
   // Add custom question states
@@ -1287,14 +1290,13 @@ Rules:
       </div>
 
       {/* ── SCORE CARD ───────────────────────────────────────────────── */}
-      {(isScoring || sessionReport || scoringError) && (
-        <div className="rtm-score-card">
-          {isScoring && (
-            <div className="rtm-score-loading">
-              <RefreshCw size={18} className="spin" />
-              <span>Generating your session report…</span>
-            </div>
-          )}
+      {(isScoringDelayed || sessionReport || scoringError) && (
+        <div className="rtm-score-card" style={{ position: 'relative', minHeight: isScoringDelayed ? '250px' : 'auto' }}>
+          <LoadingOverlay 
+            loading={isScoringDelayed} 
+            message="Generating Session Report..." 
+            subMessage="Analyzing realtime interactions, calculating overall performance, and compiling assessment summary..." 
+          />
 
           {scoringError && (
             <div className="rtm-score-fallback-banner" style={{
@@ -1317,7 +1319,7 @@ Rules:
             </div>
           )}
 
-          {sessionReport && !isScoring && (
+          {sessionReport && !isScoringDelayed && (
             <>
               <div className="rtm-score-header">
                 <div className="rtm-score-ring">

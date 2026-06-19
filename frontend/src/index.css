@@ -2753,4 +2753,121 @@ select:focus-visible {
   }
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   3D SPINNER & LOADING OVERLAYS
+   ────────────────────────────────────────────────────────────────── */
+
+/* From Uiverse.io by AqFox */ 
+.spinner {
+  width: 44px;
+  height: 44px;
+  animation: spinner-y0fdc1 2s infinite ease;
+  transform-style: preserve-3d;
+  flex-shrink: 0;
+}
+
+.spinner > div {
+  background-color: rgba(139, 92, 246, 0.15); /* Match Verbalyst primary purple */
+  height: 100%;
+  position: absolute;
+  width: 100%;
+  border: 2px solid var(--primary, #8b5cf6);
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);
+}
+
+.spinner div:nth-of-type(1) {
+  transform: translateZ(-22px) rotateY(180deg);
+}
+
+.spinner div:nth-of-type(2) {
+  transform: rotateY(-270deg) translateX(50%);
+  transform-origin: top right;
+}
+
+.spinner div:nth-of-type(3) {
+  transform: rotateY(270deg) translateX(-50%);
+  transform-origin: center left;
+}
+
+.spinner div:nth-of-type(4) {
+  transform: rotateX(90deg) translateY(-50%);
+  transform-origin: top center;
+}
+
+.spinner div:nth-of-type(5) {
+  transform: rotateX(-90deg) translateY(50%);
+  transform-origin: bottom center;
+}
+
+.spinner div:nth-of-type(6) {
+  transform: translateZ(22px);
+}
+
+@keyframes spinner-y0fdc1 {
+  0% {
+    transform: rotate(45deg) rotateX(-25deg) rotateY(-25deg);
+  }
+  50% {
+    transform: rotate(45deg) rotateX(-385deg) rotateY(25deg);
+  }
+  100% {
+    transform: rotate(45deg) rotateX(-25deg) rotateY(-25deg);
+  }
+}
+
+/* Glassmorphic Loading Overlay */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 15, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 100;
+  border-radius: inherit;
+  animation: overlayFadeIn 0.3s ease-out forwards;
+  gap: 1.25rem;
+  color: white;
+  text-align: center;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.loading-overlay.fullscreen {
+  position: fixed;
+  z-index: 9999;
+}
+
+.loading-overlay-msg {
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-main, #ffffff);
+  margin: 0;
+  max-width: 400px;
+  line-height: 1.5;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.loading-overlay-sub {
+  font-size: 0.85rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 0.25rem;
+  max-width: 320px;
+  line-height: 1.4;
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+
 

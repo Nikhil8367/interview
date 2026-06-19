@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Camera, CameraOff, Volume2, Mic, CheckCircle, RefreshCw, Keyboard } from 'lucide-react';
 import { API_BASE } from '../config';
+import LoadingOverlay from './LoadingOverlay';
+import useDelayedLoading from '../hooks/useDelayedLoading';
 
 const isLiveModel = (model) => {
   if (!model) return false;
@@ -117,6 +119,8 @@ export default function InterviewConsole({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [showIdealAnswer, setShowIdealAnswer] = useState(false);
+  const isQuestionLoading = useDelayedLoading(loadingQuestion, 3000);
+  const isResponseAnalyzing = useDelayedLoading(isAnalyzing, 3000);
 
   // Reset showIdealAnswer on question change
   useEffect(() => {
@@ -1420,7 +1424,7 @@ export default function InterviewConsole({
     handleAutoAdvanceRef.current = handleAutoAdvance;
   });
 
-  if (loadingQuestion) {
+  if (isQuestionLoading) {
     return (
       <div className="glass-panel" style={{ 
         display: 'flex', 
@@ -1428,21 +1432,25 @@ export default function InterviewConsole({
         alignItems: 'center', 
         justifyContent: 'center', 
         minHeight: '400px',
-        gap: '1.5rem',
-        textAlign: 'center',
+        position: 'relative',
         padding: '2rem'
       }}>
-        <RefreshCw size={48} className="animate-spin text-secondary" />
-        <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>AI Interviewer is formulating the next question...</h3>
-        <p style={{ color: 'var(--text-muted)', maxWidth: '400px' }}>
-          Please wait while the AI interviewer evaluates your previous answer, dynamically adjusts the difficulty, and prepares the next question.
-        </p>
+        <LoadingOverlay 
+          loading={true} 
+          message="Formulating Next Question..." 
+          subMessage="Please wait while the AI interviewer evaluates your previous answer, dynamically adjusts the difficulty, and prepares the next question."
+        />
       </div>
     );
   }
 
   return (
-    <div className="arena-grid">
+    <div className="arena-grid" style={{ position: 'relative' }}>
+      <LoadingOverlay 
+        loading={isResponseAnalyzing} 
+        message="Analyzing Response..." 
+        subMessage="Performing voice analysis, grammatical audit, and content assessment..." 
+      />
       {/* Current Question Banner */}
       <div className="current-question-banner">
         <div className="current-question-content">
