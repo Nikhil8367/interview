@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Play, Mic, MicOff, Plus, Trash2, BookOpen, Upload, Share2, Edit, Search, Check, X, Inbox } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs, updateDoc, getDoc, writeBatch, onSnapshot } from 'firebase/firestore';
+import { logActivity } from '../utils/logger';
 
 export const PRESETS = [
   {
@@ -162,7 +163,7 @@ export default function QuestionManager({
     try {
       const q = query(
         collection(db, 'users'), 
-        where('usernameNormalized', '==', searchUsername.trim().toLowerCase())
+        where('usernameNormalized', '==', searchUsername.replace(/\s+/g, '').toLowerCase())
       );
       const snapshot = await getDocs(q);
       if (snapshot.empty) {
@@ -198,6 +199,13 @@ export default function QuestionManager({
     });
     setSharingStatus(initialStatus);
     setShareSuccessMessage('');
+
+    // Log this activity (it will automatically evaluate if it's suspicious spamming)
+    await logActivity(user, 'share_request', `User shared ${questionsToShare.length} question(s) with @${searchResultUser.username}`, {
+      recipientId: searchResultUser.id,
+      recipientUsername: searchResultUser.username,
+      count: questionsToShare.length
+    });
 
     try {
       if (isSelectMode) {
@@ -351,6 +359,7 @@ export default function QuestionManager({
           // Delete share
           const shareId = `${user.id}_${editTargetQuestion.id}`;
           await deleteDoc(doc(db, 'shares', shareId));
+          await logActivity(user, 'fork_question', `Forked shared question due to text edit: "${editText.trim()}"`);
           alert("This shared question's text was updated. A separate copy has been created in your question bank.");
         } else {
           // Update shared question content collaboratively
@@ -360,6 +369,7 @@ export default function QuestionManager({
             keywords: keywordsArray,
             suggestedAnswer: editSuggestedAnswer.trim()
           });
+          await logActivity(user, 'edit_shared_question', `Collaboratively updated shared question: "${editTargetQuestion.text}"`);
           alert("Shared question updated collaboratively.");
         }
       } else {
@@ -371,6 +381,7 @@ export default function QuestionManager({
           keywords: keywordsArray,
           suggestedAnswer: editSuggestedAnswer.trim()
         });
+        await logActivity(user, 'edit_question', `Updated custom question: "${editText.trim()}"`);
       }
 
       setIsEditModalOpen(false);
@@ -474,6 +485,8 @@ export default function QuestionManager({
     const updated = [...questions, question];
     saveQuestions(updated);
     
+    logActivity(user, 'create_question', `Created new custom question: "${newText.trim()}"`, { category: newCategory });
+
     onSelectQuestion(question);
 
     setNewText('');
@@ -493,8 +506,10 @@ export default function QuestionManager({
         if (targetQ.isShared) {
           const shareId = `${user.id}_${targetQ.id}`;
           await deleteDoc(doc(db, 'shares', shareId));
+          await logActivity(user, 'delete_share', `Removed shared question: "${targetQ.text}"`);
         } else {
           await deleteDoc(doc(db, 'questions', targetQ.id));
+          await logActivity(user, 'delete_question', `Deleted custom question: "${targetQ.text}"`);
           
           const sharesQ = query(collection(db, 'shares'), where('questionId', '==', targetQ.id));
           const sharesSnap = await getDocs(sharesQ);

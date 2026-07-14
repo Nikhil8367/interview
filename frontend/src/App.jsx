@@ -8,11 +8,13 @@ import Auth from './components/Auth';
 import HistoryView from './components/HistoryView';
 import RealtimeMock from './components/RealtimeMock';
 import LoadingOverlay from './components/LoadingOverlay';
+import AdminDashboard from './components/AdminDashboard';
 import useDelayedLoading from './hooks/useDelayedLoading';
-import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic, Menu } from 'lucide-react';
+import { Sparkles, Key, RefreshCw, Settings, X, BookOpen, Tv, History, Sliders, LogOut, Mic, Menu, Shield } from 'lucide-react';
 import { API_BASE } from './config';
-import { db } from './firebase';
+import { db, auth, signOut } from './firebase';
 import { collection, query, where, getDocs, doc, getDoc, setDoc, writeBatch, onSnapshot } from 'firebase/firestore';
+import { logActivity } from './utils/logger';
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -149,9 +151,28 @@ function App() {
 
     // Listen to owned questions
     const qQuestions = query(collection(db, 'questions'), where('userId', '==', user.id));
-    unsubQuestions = onSnapshot(qQuestions, (snapshot) => {
-      latestOwned = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      rebuildAndSet();
+    unsubQuestions = onSnapshot(qQuestions, async (snapshot) => {
+      if (snapshot.empty) {
+        console.log("No questions found in Firestore for user, seeding presets...");
+        try {
+          const batch = writeBatch(db);
+          PRESETS.forEach(p => {
+            const qId = `q_${p.id}_${user.id}`;
+            const qRef = doc(db, 'questions', qId);
+            batch.set(qRef, {
+              ...p,
+              id: qId,
+              userId: user.id
+            });
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error("Error auto-seeding presets:", err);
+        }
+      } else {
+        latestOwned = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        rebuildAndSet();
+      }
     }, (err) => {
       console.error("Error listening to questions:", err);
     });
@@ -211,6 +232,59 @@ function App() {
       }
     };
   }, [user]);
+
+  // Dynamic SEO Page Metadata Updater
+  useEffect(() => {
+    let title = "Verbalyst | AI Interview Practice, Mock Interview & Prep";
+    let desc = "Ace your technical and behavioral interviews with Verbalyst. Master real-time AI mock interviews, practice interview questions online, and get instant voice coaching.";
+    
+    if (!user) {
+      title = "Get Started | Verbalyst - AI Interview Practice & Coach";
+      desc = "Join Verbalyst to start your online mock interview prep. Practice technical and behavioral questions with our advanced AI interview coach.";
+    } else {
+      switch (activeTab) {
+        case 'practice':
+          title = "AI Interview Practice Arena | Verbalyst";
+          desc = "Practice software engineering and behavioral interview questions. Get real-time speech analytics, filler-word tracking, and AI feedback to ace your next job interview.";
+          break;
+        case 'mock':
+          title = "Virtual Mock Interview Simulator | Verbalyst";
+          desc = "Simulate realistic, timed job interviews with our virtual mock interview platform. Experience adaptive difficulty, live grading, and instant performance reports.";
+          break;
+        case 'realtime-mock':
+          title = "Realtime AI Mock Interview Coach | Verbalyst";
+          desc = "Speak live with our AI interview coach in a low-latency audio/video arena. Simulate face-to-face job interviews with real-time feedback and speech scoring.";
+          break;
+        case 'history':
+          title = "Interview History & Speech Performance | Verbalyst";
+          desc = "Track your progress across multiple mock interviews and practice sessions. Analyze your improvements in pacing, technical accuracy, and voice analytics.";
+          break;
+        default:
+          break;
+      }
+    }
+    
+    document.title = title;
+    
+    // Update meta description tags
+    const descMeta = document.querySelector('meta[name="description"]');
+    if (descMeta) {
+      descMeta.setAttribute('content', desc);
+    }
+    
+    // Also update Open Graph/Twitter titles and descriptions for consistency
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    if (ogTitle) ogTitle.setAttribute('content', title);
+    
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogDesc) ogDesc.setAttribute('content', desc);
+
+    const twitterTitle = document.querySelector('meta[property="twitter:title"]');
+    if (twitterTitle) twitterTitle.setAttribute('content', title);
+    
+    const twitterDesc = document.querySelector('meta[property="twitter:description"]');
+    if (twitterDesc) twitterDesc.setAttribute('content', desc);
+  }, [activeTab, user]);
 
   // Mock Interview States
   const [mockStatus, setMockStatus] = useState('setup'); // 'setup' | 'interview' | 'analyzing' | 'report'
@@ -350,6 +424,46 @@ function App() {
 
     syncPendingReports();
   }, [user]);
+
+  // Monitor user status and roles in real-time
+  useEffect(() => {
+    if (!user) return;
+    const userRef = doc(db, 'users', user.id);
+    const unsubscribe = onSnapshot(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        
+        // 1. Force logout on account suspension
+        if (data.status === 'suspended') {
+          alert("Your account has been suspended by an administrator. You will be logged out.");
+          localStorage.removeItem('verbalyst_user');
+          localStorage.removeItem('verbalyst_login_timestamp');
+          setUser(null);
+          setQuestions(PRESETS);
+          setSettingsOpen(false);
+          return;
+        }
+
+        // 2. Sync profile attributes (e.g. role promotions)
+        if (data.role !== user.role || data.username !== user.username || data.email !== user.email) {
+          const updatedUser = { ...user, role: data.role, username: data.username, email: data.email };
+          setUser(updatedUser);
+          localStorage.setItem('verbalyst_user', JSON.stringify(updatedUser));
+        }
+      } else {
+        // Log out if profile is deleted
+        localStorage.removeItem('verbalyst_user');
+        localStorage.removeItem('verbalyst_login_timestamp');
+        setUser(null);
+        setQuestions(PRESETS);
+        setSettingsOpen(false);
+      }
+    }, (err) => {
+      console.error("Error monitoring user document:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const handleSelectQuestion = (q) => {
     setActiveQuestion(q);
@@ -597,6 +711,35 @@ function App() {
         localStorage.setItem('verbalyst_user', JSON.stringify(loggedInUser));
         localStorage.setItem('verbalyst_login_timestamp', Date.now().toString());
       }} />
+    );
+  }
+
+  // Standalone Admin Portal check - intercepts session to bypass standard layout
+  const isAdmin = user && (user.email === 'quizdmn@gmail.com' || user.role === 'admin');
+
+  if (isAdmin) {
+    return (
+      <div className="admin-portal-container" style={{ minHeight: '100vh', background: '#070a13', padding: '1.5rem' }}>
+        <AdminDashboard 
+          user={user} 
+          onLogout={async () => {
+            try {
+              await logActivity(user, 'logout', `Admin @${user.username} signed out.`);
+            } catch (err) {
+              console.error("Failed to log logout activity:", err);
+            }
+            try {
+              await signOut(auth);
+            } catch (err) {
+              console.error("Failed to sign out from Firebase Auth:", err);
+            }
+            localStorage.removeItem('verbalyst_user');
+            localStorage.removeItem('verbalyst_login_timestamp');
+            setUser(null);
+            setSettingsOpen(false);
+          }} 
+        />
+      </div>
     );
   }
 
@@ -972,7 +1115,17 @@ function App() {
           </div>
 
           <button
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await logActivity(user, 'logout', `User @${user.username} signed out of session.`);
+              } catch (err) {
+                console.error("Failed to log logout activity:", err);
+              }
+              try {
+                await signOut(auth);
+              } catch (err) {
+                console.error("Failed to sign out from Firebase Auth:", err);
+              }
               localStorage.removeItem('verbalyst_user');
               localStorage.removeItem('verbalyst_login_timestamp');
               setUser(null);
@@ -1240,6 +1393,8 @@ function App() {
               user={user}
               onSaveReport={(report) => saveReportWithBackupQueue(report, 'realtime')}
             />
+          ) : activeTab === 'admin' ? (
+            <AdminDashboard user={user} />
           ) : (
             <HistoryView user={user} />
           )}

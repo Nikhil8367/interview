@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } fr
 import { PRESETS } from './QuestionManager';
 import LoadingOverlay from './LoadingOverlay';
 import useDelayedLoading from '../hooks/useDelayedLoading';
+import { logActivity } from '../utils/logger';
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -30,8 +31,10 @@ export default function Auth({ onLogin }) {
         userData = {
           id: firebaseUser.uid,
           username: usernameVal,
-          usernameNormalized: usernameVal.trim().toLowerCase(),
+          usernameNormalized: usernameVal.replace(/\s+/g, '').toLowerCase(),
           email: firebaseUser.email,
+          role: 'user',
+          status: 'active',
           createdAt: new Date().toISOString()
         };
         await setDoc(userRef, userData);
@@ -48,11 +51,23 @@ export default function Auth({ onLogin }) {
           });
         });
         await batch.commit();
+        await logActivity(userData, 'register', `User registered via Google Sign-In with display name ${usernameVal}`);
       } else {
         userData = userDoc.data();
+        if (userData.status === 'suspended') {
+          await logActivity({ id: firebaseUser.uid, username: userData.username }, 'login_failed', 'Attempted login with a suspended account.');
+          throw new Error('Your account has been suspended by an administrator.');
+        }
       }
 
-      onLogin({ id: userData.id, username: userData.username });
+      await logActivity(userData, 'login', 'User logged in via Google Sign-In');
+      onLogin({ 
+        id: userData.id, 
+        username: userData.username, 
+        email: userData.email, 
+        role: userData.role || 'user', 
+        status: userData.status || 'active' 
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -72,7 +87,7 @@ export default function Auth({ onLogin }) {
     setLoading(true);
     
     // Normalize to a valid email string for Firebase Auth
-    const email = username.includes('@') ? username.trim().toLowerCase() : `${username.trim().toLowerCase()}@verbalyst.com`;
+    const email = username.includes('@') ? username.trim().toLowerCase() : `${username.replace(/\s+/g, '').toLowerCase()}@verbalyst.com`;
 
     try {
       if (isLogin) {
@@ -86,10 +101,27 @@ export default function Auth({ onLogin }) {
         let userData;
         if (userDoc.exists()) {
           userData = userDoc.data();
+          if (userData.status === 'suspended') {
+            await logActivity({ id: firebaseUser.uid, username: userData.username }, 'login_failed', 'Attempted login with a suspended account.');
+            throw new Error('Your account has been suspended by an administrator.');
+          }
         } else {
-          userData = { id: firebaseUser.uid, username: username.trim() };
+          userData = { 
+            id: firebaseUser.uid, 
+            username: username.trim(), 
+            email: firebaseUser.email || email, 
+            role: 'user', 
+            status: 'active' 
+          };
         }
-        onLogin({ id: userData.id, username: userData.username });
+        await logActivity(userData, 'login', 'User logged in via email/password');
+        onLogin({ 
+          id: userData.id, 
+          username: userData.username, 
+          email: userData.email, 
+          role: userData.role || 'user', 
+          status: userData.status || 'active' 
+        });
       } else {
         // Register in Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -98,8 +130,10 @@ export default function Auth({ onLogin }) {
         const userData = {
           id: firebaseUser.uid,
           username: username.trim(),
-          usernameNormalized: username.trim().toLowerCase(),
+          usernameNormalized: username.replace(/\s+/g, '').toLowerCase(),
           email: firebaseUser.email,
+          role: 'user',
+          status: 'active',
           createdAt: new Date().toISOString()
         };
         await setDoc(doc(db, 'users', firebaseUser.uid), userData);
@@ -117,7 +151,15 @@ export default function Auth({ onLogin }) {
         });
         await batch.commit();
 
-        onLogin({ id: userData.id, username: userData.username });
+        await logActivity(userData, 'register', `New user registered: ${username.trim()}`);
+        await logActivity(userData, 'login', 'User logged in after registration');
+        onLogin({ 
+          id: userData.id, 
+          username: userData.username, 
+          email: userData.email, 
+          role: userData.role || 'user', 
+          status: userData.status || 'active' 
+        });
       }
     } catch (err) {
       let msg = err.message;
@@ -128,11 +170,13 @@ export default function Auth({ onLogin }) {
       } else if (err.code === 'auth/weak-password') {
         msg = 'Password should be at least 6 characters.';
       }
+      await logActivity({ id: 'anonymous', username: username }, 'login_failed', `Failed login attempt for username: ${username.trim()}. Error: ${msg}`);
       setError(msg);
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <div style={{ 

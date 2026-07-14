@@ -3,52 +3,86 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Helper function to check if the requester is an administrator
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin';
+    }
+
+    // Helper function to verify the user account is active and not suspended
+    function isNotSuspended() {
+      return request.auth != null && 
+        (!exists(/databases/$(database)/documents/users/$(request.auth.uid)) || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended');
+    }
+    
     // User Profile Rules
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && (
+        isAdmin() || 
+        (request.auth.uid == userId && isNotSuspended() && (!('role' in request.resource.data) || request.resource.data.role == resource.data.get('role', 'user')))
+      );
+      allow delete: if isAdmin();
     }
 
     // Scoped Questions Rules
     match /questions/{questionId} {
-      allow read: if request.auth != null && (
+      allow read: if request.auth != null && isNotSuspended() && (
         resource.data.userId == request.auth.uid ||
+        isAdmin() ||
         (exists(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)) &&
          get(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)).data.status == 'accepted')
       );
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null && (
+      allow create: if request.auth != null && isNotSuspended() && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && isNotSuspended() && (
         (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) ||
+        isAdmin() ||
         (exists(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)) &&
          get(/databases/$(database)/documents/shares/$(request.auth.uid + '_' + questionId)).data.status == 'accepted')
       );
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && isNotSuspended() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Question Shares Rules
     match /shares/{shareId} {
-      allow read: if request.auth != null && (
+      allow read: if request.auth != null && isNotSuspended() && (
         resource.data.senderId == request.auth.uid || 
-        resource.data.receiverId == request.auth.uid
+        resource.data.receiverId == request.auth.uid ||
+        isAdmin()
       );
-      allow create: if request.auth != null && 
+      allow create: if request.auth != null && isNotSuspended() && 
         request.resource.data.senderId == request.auth.uid;
-      allow update: if request.auth != null && (
+      allow update: if request.auth != null && isNotSuspended() && (
         resource.data.receiverId == request.auth.uid || 
-        resource.data.senderId == request.auth.uid
+        resource.data.senderId == request.auth.uid ||
+        isAdmin()
       );
-      allow delete: if request.auth != null && (
+      allow delete: if request.auth != null && isNotSuspended() && (
         resource.data.senderId == request.auth.uid || 
-        resource.data.receiverId == request.auth.uid
+        resource.data.receiverId == request.auth.uid ||
+        isAdmin()
       );
     }
 
     // Scoped Reports Rules
     match /reports/{reportId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && isNotSuspended() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null && isNotSuspended() && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && isNotSuspended() && (
+        (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow delete: if request.auth != null && isNotSuspended() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Activity Logs Rules (only administrators can view logs)
+    match /activity_logs/{logId} {
+      allow read: if request.auth != null && isAdmin();
+      allow create: if request.auth != null && isNotSuspended();
+      allow update, delete: if false;
     }
   }
 }

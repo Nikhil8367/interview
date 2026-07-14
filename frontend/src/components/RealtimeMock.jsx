@@ -362,6 +362,36 @@ export default function RealtimeMock({ questions = [], setQuestions, apiKey, gem
       .map(d => `${d.sender === 'ai' ? 'Interviewer' : 'Candidate'}: ${d.text}`)
       .join('\n');
 
+    // Pre-extract the specific questions asked by the interviewer to force exact alignment
+    const aiQuestions = [];
+    dialogueSnap.forEach(d => {
+      if (d.sender === 'ai') {
+        const text = d.text.trim();
+        const isIntroOrOutro = text.toLowerCase().includes('welcome') || 
+                               text.toLowerCase().includes('thank you for') || 
+                               text.toLowerCase().includes('conclude') || 
+                               text.toLowerCase().includes('bye') || 
+                               (text.length < 15 && !text.includes('?'));
+        if (text && !isIntroOrOutro) {
+          aiQuestions.push(text);
+        }
+      }
+    });
+
+    if (aiQuestions.length === 0) {
+      dialogueSnap.forEach(d => {
+        if (d.sender === 'ai' && d.text.trim()) {
+          aiQuestions.push(d.text.trim());
+        }
+      });
+    }
+
+    if (aiQuestions.length === 0) {
+      aiQuestions.push("General Interview Questions");
+    }
+
+    const questionsPromptList = aiQuestions.map((q, idx) => `${idx + 1}. "${q}"`).join('\n');
+
     const prompt = `You are an expert interview coach. The candidate selected the following topics for assessment: ${selectedTopics.join(', ')}.
 Analyse this mock interview transcript and respond with ONLY valid JSON matching exactly this schema:
 {
@@ -390,7 +420,12 @@ Analyse this mock interview transcript and respond with ONLY valid JSON matching
 }
 
 Instructions for evaluation:
-- If the candidate answers "I don't know", "idk", or similar non-answers, score that question 0, and list the missing target technical concepts of the question under the "theoryMistakes" array, explaining that the candidate was unsure and specifying the target concept they should have covered.
+- You MUST evaluate and include EVERY single question asked by the Interviewer in the transcript.
+- Specifically, the Interviewer asked the following ${aiQuestions.length} question(s) during the session:
+${questionsPromptList}
+
+- Your JSON's "questions" array MUST contain exactly ${aiQuestions.length} elements, each matching the corresponding question in the exact list above, in order. Do NOT skip, combine, or omit any of these questions.
+- For each question, extract the Candidate's response from the transcript. If the candidate answered "I don't know", "idk", or similar non-answers, score that question 0, map the candidate's answer to "No response / Unknown", and list the missing target technical concepts of the question under the "theoryMistakes" array, explaining that the candidate was unsure and specifying the target concept they should have covered.
 - Identify grammar and delivery mistakes or awkward phrasings under "grammarMistakes".
 
 Transcript:

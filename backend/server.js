@@ -15,6 +15,25 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+// Middleware to check and block suspended users
+const checkSuspension = async (req, res, next) => {
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return next();
+  }
+  try {
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists && userDoc.data().status === 'suspended') {
+      return res.status(403).json({ error: 'Your account has been suspended by an administrator.' });
+    }
+  } catch (error) {
+    console.error('Error checking user suspension in middleware:', error);
+  }
+  next();
+};
+
+app.use(checkSuspension);
+
 // Seed Question Presets
 const PRESETS = [
   {
@@ -70,11 +89,16 @@ app.post('/api/auth/google', async (req, res) => {
     let user = null;
 
     if (!doc.exists) {
+      const usernameVal = name || (email ? email.split('@')[0] : 'user_' + Math.random().toString(36).substr(2, 5));
       user = {
         id: uid,
-        username: name || (email ? email.split('@')[0] : 'user_' + Math.random().toString(36).substr(2, 5)),
+        username: usernameVal,
+        usernameNormalized: usernameVal.replace(/\s+/g, '').toLowerCase(),
         email: email || '',
-        picture: picture || ''
+        picture: picture || '',
+        role: 'user',
+        status: 'active',
+        createdAt: new Date().toISOString()
       };
       await usersRef.doc(uid).set(user);
 
@@ -92,6 +116,9 @@ app.post('/api/auth/google', async (req, res) => {
       await batch.commit();
     } else {
       user = doc.data();
+      if (user.status === 'suspended') {
+        return res.status(403).json({ error: 'Your account has been suspended by an administrator.' });
+      }
     }
 
     res.json({ success: true, user: { id: user.id, username: user.username } });
@@ -107,7 +134,7 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedUsername = username.replace(/\s+/g, '').toLowerCase();
   
   try {
     const usersRef = db.collection('users');
@@ -117,7 +144,15 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const userId = 'u_' + Math.random().toString(36).substr(2, 9);
-    const newUser = { id: userId, username: username.trim(), usernameNormalized: normalizedUsername, password };
+    const newUser = { 
+      id: userId, 
+      username: username.trim(), 
+      usernameNormalized: normalizedUsername, 
+      password,
+      role: 'user',
+      status: 'active',
+      createdAt: new Date().toISOString()
+    };
     await usersRef.doc(userId).set(newUser);
 
     // Seed default questions scoped for this user
@@ -146,7 +181,7 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedUsername = username.replace(/\s+/g, '').toLowerCase();
   
   try {
     const usersRef = db.collection('users');
@@ -160,6 +195,9 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const userDoc = snapshot.docs[0].data();
+    if (userDoc.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account has been suspended by an administrator.' });
+    }
     res.json({ success: true, user: { id: userDoc.id, username: userDoc.username } });
   } catch (error) {
     console.error('Error in login:', error);
