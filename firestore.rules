@@ -18,8 +18,9 @@ service cloud.firestore {
     }
     
     // User Profile Rules
+    // read: own doc, admin, OR any active authenticated user (needed for share username search)
     match /users/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow read: if request.auth != null && isNotSuspended();
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if request.auth != null && (
         isAdmin() || 
